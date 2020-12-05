@@ -12,6 +12,7 @@ pub fn build(b: *Builder) void {
     const mode = b.standardReleaseOptions();
 
     const exe = b.addExecutable("minizign", "src/main.zig");
+    exe.single_threaded = true;
     exe.setTarget(target);
     exe.setBuildMode(mode);
     exe.install();

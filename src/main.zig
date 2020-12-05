@@ -82,6 +82,10 @@ const PublicKey = struct {
     }
 
     fn verify(self: PublicKey, allocator: *mem.Allocator, fd: fs.File, sig: Signature) !void {
+        if (!mem.eql(u8, &sig.key_id, &self.key_id)) {
+            std.debug.print("Signature was made using a different key\n", .{});
+            return error.KeyIdMismatch;
+        }
         const signature_algorithm = sig.signature_algorithm;
         const prehashed = if (signature_algorithm[0] == 0x45 and signature_algorithm[1] == 0x64) false else if (signature_algorithm[0] == 0x45 and signature_algorithm[1] == 0x44) true else return error.UnsupportedAlgorithm;
         var digest: [64]u8 = undefined;
