@@ -56,6 +56,7 @@ const Signature = struct {
         const fd = try fs.cwd().openFile(path, .{ .read = true });
         defer fd.close();
         const sig_str = try fd.readToEndAlloc(allocator, 4096);
+        defer allocator.free(sig_str);
         return Signature.decode(allocator, sig_str);
     }
 };
@@ -79,6 +80,20 @@ const PublicKey = struct {
             .key = bin[10..42].*,
         };
         return pk;
+    }
+
+    fn decode(lines_str: []const u8) !PublicKey {
+        var it = mem.tokenize(lines_str, "\n");
+        _ = it.next() orelse return error.InvalidEncoding;
+        return fromBase64(it.next() orelse return error.InvalidEncoding);
+    }
+
+    fn fromFile(allocator: *mem.Allocator, path: []const u8) !PublicKey {
+        const fd = try fs.cwd().openFile(path, .{ .read = true });
+        defer fd.close();
+        const pk_str = try fd.readToEndAlloc(allocator, 4096);
+        defer allocator.free(pk_str);
+        return PublicKey.decode(pk_str);
     }
 
     fn verify(self: PublicKey, allocator: *mem.Allocator, fd: fs.File, sig: Signature) !void {
@@ -120,12 +135,16 @@ fn verify(allocator: *mem.Allocator, pk: PublicKey, path: []const u8, sig: Signa
     try pk.verify(allocator, fd, sig);
 }
 
-const params = comptime [_]clap.Param(clap.Help){
-    clap.parseParam("-h, --help               Display this help and exit.") catch unreachable,
-    clap.parseParam("-P, --publickey <STRING> Public key, as a BASE64-encoded string. ") catch unreachable,
-    clap.parseParam("-m, --input <FILE>       Input file.") catch unreachable,
-    clap.parseParam("-q, --quiet              Quiet mode.") catch unreachable,
-    clap.parseParam("-V, --verify             Verify.") catch unreachable,
+const params = params: {
+    @setEvalBranchQuota(10000);
+    break :params [_]clap.Param(clap.Help){
+        clap.parseParam("-h, --help                  Display this help and exit") catch unreachable,
+        clap.parseParam("-p, --publickey-path <PATH> Public key path to a file") catch unreachable,
+        clap.parseParam("-P, --publickey <STRING>    Public key, as a BASE64-encoded string") catch unreachable,
+        clap.parseParam("-m, --input <PATH>          Input file") catch unreachable,
+        clap.parseParam("-q, --quiet                 Quiet mode") catch unreachable,
+        clap.parseParam("-V, --verify                Verify") catch unreachable,
+    };
 };
 
 fn usage() noreturn {
@@ -142,25 +161,23 @@ fn doit(gpa_allocator: *mem.Allocator) !void {
         os.exit(1);
     };
     defer args.deinit();
-    var pk_b64: ?[]const u8 = null;
-    var path: ?[]const u8 = null;
+
+    if (args.flag("--help")) usage();
     const quiet = args.flag("--quiet");
-    if (args.option("--publickey")) |arg| {
-        pk_b64 = arg;
-    }
-    if (args.option("--input")) |arg| {
-        path = arg;
-    }
-    if (pk_b64 == null or path == null) {
+    const pk_b64 = args.option("--publickey");
+    const pk_path = args.option("--publickey-path");
+    const input_path = args.option("--input");
+
+    if ((pk_path == null and pk_b64 == null) or input_path == null) {
         usage();
     }
-    const pk = try PublicKey.fromBase64(pk_b64.?);
+    const pk = if (pk_b64) |b64| try PublicKey.fromBase64(b64) else try PublicKey.fromFile(gpa_allocator, pk_path.?);
 
     var arena = heap.ArenaAllocator.init(gpa_allocator);
     defer arena.deinit();
-    const path_sig = try fmt.allocPrint(&arena.allocator, "{}.minisig", .{path});
-    const sig = try Signature.fromFile(&arena.allocator, path_sig);
-    if (verify(&arena.allocator, pk, path.?, sig)) {
+    const sig_path = try fmt.allocPrint(&arena.allocator, "{}.minisig", .{input_path});
+    const sig = try Signature.fromFile(&arena.allocator, sig_path);
+    if (verify(&arena.allocator, pk, input_path.?, sig)) {
         if (!quiet) {
             debug.print("Signature and comment signature verified\nTrusted comment: {}\n", .{sig.trusted_comment});
         }
