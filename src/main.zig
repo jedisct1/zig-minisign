@@ -148,7 +148,7 @@ const params = params: {
 };
 
 fn usage() noreturn {
-    var out = std.io.getStdErr().outStream();
+    var out = std.io.getStdErr().writer();
     out.writeAll("Usage:\n") catch unreachable;
     clap.help(out, &params) catch unreachable;
     os.exit(1);
@@ -157,7 +157,7 @@ fn usage() noreturn {
 fn doit(gpa_allocator: *mem.Allocator) !void {
     var diag: clap.Diagnostic = undefined;
     var args = clap.parse(clap.Help, &params, gpa_allocator, &diag) catch |err| {
-        diag.report(std.io.getStdErr().outStream(), err) catch {};
+        diag.report(std.io.getStdErr().writer(), err) catch {};
         os.exit(1);
     };
     defer args.deinit();
@@ -175,11 +175,11 @@ fn doit(gpa_allocator: *mem.Allocator) !void {
 
     var arena = heap.ArenaAllocator.init(gpa_allocator);
     defer arena.deinit();
-    const sig_path = try fmt.allocPrint(&arena.allocator, "{}.minisig", .{input_path});
+    const sig_path = try fmt.allocPrint(&arena.allocator, "{s}.minisig", .{input_path});
     const sig = try Signature.fromFile(&arena.allocator, sig_path);
     if (verify(&arena.allocator, pk, input_path.?, sig)) {
         if (!quiet) {
-            debug.print("Signature and comment signature verified\nTrusted comment: {}\n", .{sig.trusted_comment});
+            debug.print("Signature and comment signature verified\nTrusted comment: {s}\n", .{sig.trusted_comment});
         }
     } else |_| {
         if (!quiet) {
