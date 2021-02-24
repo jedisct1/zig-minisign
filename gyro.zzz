@@ -1,0 +1,14 @@
+pkgs:
+  minisign:
+    version: 0.0.0
+    description: "Minisign reimplemented in Zig."
+    source_url: "https://github.com/jedisct1/zig-minisign"
+    tags:
+      minisign
+      crypto
+      signatures
+
+    root: src/main.zig
+    files:
+      README.md
+      LICENSE
