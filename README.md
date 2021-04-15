@@ -65,4 +65,4 @@ SSH-encoded keys can be loaded by `minizign` the same way as native keys, with `
 
 ## Features
 
-`minizign` supports prehashing, has zero dependencies, can be cross-compiled to anything that Zig can cross-compile to, including WebAssembly.
+`minizign` supports prehashing, has zero dependencies and can be cross-compiled to anything that Zig can cross-compile to, including WebAssembly.
