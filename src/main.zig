@@ -145,7 +145,7 @@ const PublicKey = struct {
                 if (read_nb == 0) {
                     break;
                 }
-                h.update(&buf);
+                h.update(buf[0..read_nb]);
             }
             h.final(&digest);
             try Ed25519.verify(sig.signature, &digest, self.key);
