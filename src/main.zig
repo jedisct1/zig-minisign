@@ -32,7 +32,7 @@ const Signature = struct {
         var it = mem.tokenize(lines_str, "\n");
         const untrusted_comment = it.next() orelse return error.InvalidEncoding;
         var bin1: [74]u8 = undefined;
-        try base64.standard_decoder.decode(&bin1, it.next() orelse return error.InvalidEncoding);
+        try base64.standard.Decoder.decode(&bin1, it.next() orelse return error.InvalidEncoding);
         var trusted_comment = it.next() orelse return error.InvalidEncoding;
         if (!mem.startsWith(u8, trusted_comment, "trusted comment: ")) {
             return error.InvalidEncoding;
