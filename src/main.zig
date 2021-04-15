@@ -63,7 +63,7 @@ const Signature = struct {
 
 const PublicKey = struct {
     untrusted_comment: ?[]u8 = null,
-    signature_algorithm: [2]u8,
+    signature_algorithm: [2]u8 = "Ed".*,
     key_id: [8]u8,
     key: [32]u8,
 
@@ -82,7 +82,39 @@ const PublicKey = struct {
         return pk;
     }
 
+    fn decodeFromSsh(line: []const u8) !PublicKey {
+        var pk = PublicKey{ .key_id = mem.zeroes([8]u8), .key = undefined };
+        const key_type = "ssh-ed25519";
+
+        var it = mem.tokenize(line, " ");
+        const header = it.next() orelse return error.InvalidEncoding;
+        if (!mem.eql(u8, key_type, header)) {
+            return error.InvalidEncoding;
+        }
+        const encoded_ssh_key = it.next() orelse return error.InvalidEncoding;
+        var ssh_key: [4 + key_type.len + 4 + pk.key.len]u8 = undefined;
+        try base64.standard.Decoder.decode(&ssh_key, encoded_ssh_key);
+        if (mem.readIntBig(u32, ssh_key[0..4]) != key_type.len or
+            !mem.eql(u8, ssh_key[4..][0..key_type.len], key_type) or
+            mem.readIntBig(u32, ssh_key[4 + key_type.len ..][0..4]) != pk.key.len)
+        {
+            return error.InvalidEncoding;
+        }
+        mem.copy(u8, &pk.key, ssh_key[4 + key_type.len + 4 ..]);
+
+        const rest = mem.trim(u8, it.rest(), " \t\r\n");
+        const key_id_prefix = "minisign key ";
+        if (!mem.startsWith(u8, rest, key_id_prefix)) {
+            return pk;
+        }
+        mem.writeIntLittle(u64, &pk.key_id, try fmt.parseInt(u64, rest[key_id_prefix.len..], 16));
+
+        return pk;
+    }
+
     fn decode(lines_str: []const u8) !PublicKey {
+        if (decodeFromSsh(lines_str)) |pk| return pk else |_| {}
+
         var it = mem.tokenize(lines_str, "\n");
         _ = it.next() orelse return error.InvalidEncoding;
         return fromBase64(it.next() orelse return error.InvalidEncoding);
@@ -97,7 +129,8 @@ const PublicKey = struct {
     }
 
     fn verify(self: PublicKey, allocator: *mem.Allocator, fd: fs.File, sig: Signature) !void {
-        if (!mem.eql(u8, &sig.key_id, &self.key_id)) {
+        const null_key_id = mem.zeroes([self.key_id.len]u8);
+        if (!mem.eql(u8, &null_key_id, &self.key_id) and !mem.eql(u8, &sig.key_id, &self.key_id)) {
             std.debug.print("Signature was made using a different key\n", .{});
             return error.KeyIdMismatch;
         }
@@ -135,6 +168,26 @@ fn verify(allocator: *mem.Allocator, pk: PublicKey, path: []const u8, sig: Signa
     try pk.verify(allocator, fd, sig);
 }
 
+fn convertToSsh(pk: PublicKey) !void {
+    const key_type = "ssh-ed25519";
+    var ssh_key: [4 + key_type.len + 4 + pk.key.len]u8 = undefined;
+    mem.writeIntBig(u32, ssh_key[0..4], key_type.len);
+    mem.copy(u8, ssh_key[4..], key_type);
+    mem.writeIntBig(u32, ssh_key[4 + key_type.len ..][0..4], pk.key.len);
+    mem.copy(u8, ssh_key[4 + key_type.len + 4 ..], &pk.key);
+
+    const Base64Encoder = base64.standard.Encoder;
+    var encoded_ssh_key: [Base64Encoder.calcSize(ssh_key.len)]u8 = undefined;
+    _ = Base64Encoder.encode(&encoded_ssh_key, &ssh_key);
+    var encoded_key_id: [2 * pk.key_id.len]u8 = undefined;
+
+    const key_id_prefix = "minisign key ";
+    var full_ssh_key: [key_type.len + 1 + encoded_ssh_key.len + 1 + key_id_prefix.len + 16 + 1]u8 = undefined;
+    _ = try fmt.bufPrint(&full_ssh_key, "{s} {s} {s}{X}\n", .{ key_type, encoded_ssh_key, key_id_prefix, mem.readIntLittle(u64, &pk.key_id) });
+    const fd = std.io.getStdOut();
+    _ = try fd.write(&full_ssh_key);
+}
+
 const params = params: {
     @setEvalBranchQuota(10000);
     break :params [_]clap.Param(clap.Help){
@@ -144,6 +197,7 @@ const params = params: {
         clap.parseParam("-m, --input <PATH>          Input file") catch unreachable,
         clap.parseParam("-q, --quiet                 Quiet mode") catch unreachable,
         clap.parseParam("-V, --verify                Verify") catch unreachable,
+        clap.parseParam("-C, --convert               Convert the given public key to SSH format") catch unreachable,
     };
 };
 
@@ -168,10 +222,18 @@ fn doit(gpa_allocator: *mem.Allocator) !void {
     const pk_path = args.option("--publickey-path");
     const input_path = args.option("--input");
 
-    if ((pk_path == null and pk_b64 == null) or input_path == null) {
+    if (pk_path == null and pk_b64 == null) {
         usage();
     }
     const pk = if (pk_b64) |b64| try PublicKey.fromBase64(b64) else try PublicKey.fromFile(gpa_allocator, pk_path.?);
+
+    if (args.flag("--convert")) {
+        return convertToSsh(pk);
+    }
+
+    if (input_path == null) {
+        usage();
+    }
 
     var arena = heap.ArenaAllocator.init(gpa_allocator);
     defer arena.deinit();
