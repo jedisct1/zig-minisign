@@ -122,14 +122,14 @@ fn parseParamRest(line: []const u8) Param(Help) {
 }
 
 fn expectParam(expect: Param(Help), actual: Param(Help)) void {
-    testing.expectEqualStrings(expect.id.msg, actual.id.msg);
-    testing.expectEqualStrings(expect.id.value, actual.id.value);
-    testing.expectEqual(expect.names.short, actual.names.short);
-    testing.expectEqual(expect.takes_value, actual.takes_value);
+    try testing.expectEqualStrings(expect.id.msg, actual.id.msg);
+    try testing.expectEqualStrings(expect.id.value, actual.id.value);
+    try testing.expectEqual(expect.names.short, actual.names.short);
+    try testing.expectEqual(expect.takes_value, actual.takes_value);
     if (expect.names.long) |long| {
-        testing.expectEqualStrings(long, actual.names.long.?);
+        try testing.expectEqualStrings(long, actual.names.long.?);
     } else {
-        testing.expectEqual(@as(?[]const u8, null), actual.names.long);
+        try testing.expectEqual(@as(?[]const u8, null), actual.names.long);
     }
 }
 
@@ -245,11 +245,11 @@ test "parseParam" {
         .takes_value = .Many,
     }, try parseParam("<A>... Help text"));
 
-    testing.expectError(error.TrailingComma, parseParam("--long, Help"));
-    testing.expectError(error.TrailingComma, parseParam("-s, Help"));
-    testing.expectError(error.InvalidShortParam, parseParam("-ss Help"));
-    testing.expectError(error.InvalidShortParam, parseParam("-ss <value> Help"));
-    testing.expectError(error.InvalidShortParam, parseParam("- Help"));
+    try testing.expectError(error.TrailingComma, parseParam("--long, Help"));
+    try testing.expectError(error.TrailingComma, parseParam("-s, Help"));
+    try testing.expectError(error.InvalidShortParam, parseParam("-ss Help"));
+    try testing.expectError(error.InvalidShortParam, parseParam("-ss <value> Help"));
+    try testing.expectError(error.InvalidShortParam, parseParam("- Help"));
 }
 
 /// Optional diagnostics used for reporting useful errors
@@ -284,7 +284,7 @@ fn testDiag(diag: Diagnostic, err: anyerror, expected: []const u8) void {
     var buf: [1024]u8 = undefined;
     var slice_stream = io.fixedBufferStream(&buf);
     diag.report(slice_stream.outStream(), err) catch unreachable;
-    testing.expectEqualStrings(expected, slice_stream.getWritten());
+    try testing.expectEqualStrings(expected, slice_stream.getWritten());
 }
 
 test "Diagnostic.report" {
@@ -514,7 +514,7 @@ test "clap.help" {
         "\t-d, --dd <V3>   \tBoth option.\n" ++
         "\t-d, --dd <V3>...\tBoth repeated option.\n";
 
-    testing.expectEqualStrings(expected, slice_stream.getWritten());
+    try testing.expectEqualStrings(expected, slice_stream.getWritten());
 }
 
 /// Will print a usage message in the following format:
@@ -612,7 +612,7 @@ fn testUsage(expected: []const u8, params: []const Param(Help)) !void {
     var buf: [1024]u8 = undefined;
     var fbs = io.fixedBufferStream(&buf);
     try usage(fbs.outStream(), params);
-    testing.expectEqualStrings(expected, fbs.getWritten());
+    try testing.expectEqualStrings(expected, fbs.getWritten());
 }
 
 test "usage" {

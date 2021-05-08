@@ -165,14 +165,14 @@ test "" {
     var args = try Clap.parse(&fb_allocator.allocator, &iter, null);
     defer args.deinit();
 
-    testing.expect(args.flag("-a"));
-    testing.expect(args.flag("--aa"));
-    testing.expect(!args.flag("-b"));
-    testing.expect(!args.flag("--bb"));
-    testing.expectEqualStrings("0", args.option("-c").?);
-    testing.expectEqualStrings("0", args.option("--cc").?);
-    testing.expectEqual(@as(usize, 1), args.positionals().len);
-    testing.expectEqualStrings("something", args.positionals()[0]);
-    testing.expectEqualSlices([]const u8, &[_][]const u8{ "a", "b" }, args.options("-d"));
-    testing.expectEqualSlices([]const u8, &[_][]const u8{ "a", "b" }, args.options("--dd"));
+    try testing.expect(args.flag("-a"));
+    try testing.expect(args.flag("--aa"));
+    try testing.expect(!args.flag("-b"));
+    try testing.expect(!args.flag("--bb"));
+    try testing.expectEqualStrings("0", args.option("-c").?);
+    try testing.expectEqualStrings("0", args.option("--cc").?);
+    try testing.expectEqual(@as(usize, 1), args.positionals().len);
+    try testing.expectEqualStrings("something", args.positionals()[0]);
+    try testing.expectEqualSlices([]const u8, &[_][]const u8{ "a", "b" }, args.options("-d"));
+    try testing.expectEqualSlices([]const u8, &[_][]const u8{ "a", "b" }, args.options("--dd"));
 }

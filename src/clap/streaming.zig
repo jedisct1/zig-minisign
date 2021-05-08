@@ -211,13 +211,13 @@ fn testNoErr(params: []const clap.Param(u8), args_strings: []const []const u8, r
 
     for (results) |res| {
         const arg = (c.next(null) catch unreachable) orelse unreachable;
-        testing.expectEqual(res.param, arg.param);
+        try testing.expectEqual(res.param, arg.param);
         const expected_value = res.value orelse {
-            testing.expectEqual(@as(@TypeOf(arg.value), null), arg.value);
+            try testing.expectEqual(@as(@TypeOf(arg.value), null), arg.value);
             continue;
         };
         const actual_value = arg.value orelse unreachable;
-        testing.expectEqualSlices(u8, expected_value, actual_value);
+        try testing.expectEqualSlices(u8, expected_value, actual_value);
     }
 
     if (c.next(null) catch unreachable) |_|
@@ -235,11 +235,11 @@ fn testErr(params: []const clap.Param(u8), args_strings: []const []const u8, exp
         var buf: [1024]u8 = undefined;
         var slice_stream = io.fixedBufferStream(&buf);
         diag.report(slice_stream.outStream(), err) catch unreachable;
-        testing.expectEqualStrings(expected, slice_stream.getWritten());
+        try testing.expectEqualStrings(expected, slice_stream.getWritten());
         return;
     }) |_| {}
 
-    testing.expect(false);
+    try testing.expect(false);
 }
 
 test "short params" {

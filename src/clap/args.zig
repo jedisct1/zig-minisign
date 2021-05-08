@@ -267,33 +267,33 @@ pub const ShellIterator = struct {
 };
 
 fn testShellIteratorOk(str: []const u8, allocations: usize, expect: []const []const u8) void {
-    var allocator = testing.FailingAllocator.init(testing.allocator, allocations);
+    var allocator = try testing.FailingAllocator.init(try testing.allocator, allocations);
     var it = ShellIterator.init(&allocator.allocator, str);
     defer it.deinit();
 
     for (expect) |e| {
         if (it.next()) |actual| {
-            testing.expect(actual != null);
-            testing.expectEqualStrings(e, actual.?);
-        } else |err| testing.expectEqual(@as(anyerror![]const u8, e), err);
+            try testing.expect(actual != null);
+            try testing.expectEqualStrings(e, actual.?);
+        } else |err| try testing.expectEqual(@as(anyerror![]const u8, e), err);
     }
 
     if (it.next()) |actual| {
-        testing.expectEqual(@as(?[]const u8, null), actual);
-        testing.expectEqual(allocations, allocator.allocations);
-    } else |err| testing.expectEqual(@as(anyerror!void, {}), err);
+        try testing.expectEqual(@as(?[]const u8, null), actual);
+        try testing.expectEqual(allocations, allocator.allocations);
+    } else |err| try testing.expectEqual(@as(anyerror!void, {}), err);
 }
 
 fn testShellIteratorErr(str: []const u8, expect: anyerror) void {
-    var it = ShellIterator.init(testing.allocator, str);
+    var it = ShellIterator.init(try testing.allocator, str);
     defer it.deinit();
 
     while (it.next() catch |err| {
-        testing.expectError(expect, @as(anyerror!void, err));
+        try testing.expectError(expect, @as(anyerror!void, err));
         return;
     }) |_| {}
 
-    testing.expectError(expect, @as(anyerror!void, {}));
+    try testing.expectError(expect, @as(anyerror!void, {}));
 }
 
 test "ShellIterator" {
