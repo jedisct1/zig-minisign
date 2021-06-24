@@ -179,7 +179,6 @@ fn convertToSsh(pk: PublicKey) !void {
     const Base64Encoder = base64.standard.Encoder;
     var encoded_ssh_key: [Base64Encoder.calcSize(ssh_key.len)]u8 = undefined;
     _ = Base64Encoder.encode(&encoded_ssh_key, &ssh_key);
-    var encoded_key_id: [2 * pk.key_id.len]u8 = undefined;
 
     const key_id_prefix = "minisign key ";
     var full_ssh_key: [key_type.len + 1 + encoded_ssh_key.len + 1 + key_id_prefix.len + 16 + 1]u8 = undefined;
