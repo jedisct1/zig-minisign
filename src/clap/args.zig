@@ -12,6 +12,7 @@ pub const ExampleArgIterator = struct {
     const Error = error{};
 
     pub fn next(iter: *ExampleArgIterator) Error!?[]const u8 {
+        _ = iter;
         return "2";
     }
 };
@@ -34,8 +35,8 @@ pub const SliceIterator = struct {
 };
 
 test "SliceIterator" {
-    const args = &[_][]const u8{ "A", "BB", "CCC" };
-    var iter = SliceIterator{ .args = args };
+    const args = [_][]const u8{ "A", "BB", "CCC" };
+    var iter = SliceIterator{ .args = &args };
 
     for (args) |a| {
         const b = try iter.next();
@@ -252,7 +253,12 @@ pub const ShellIterator = struct {
         }
     }
 
-    fn result(iter: *ShellIterator, start: usize, end: usize, list: *std.ArrayList(u8)) Error!?[]const u8 {
+    fn result(
+        iter: *ShellIterator,
+        start: usize,
+        end: usize,
+        list: *std.ArrayList(u8),
+    ) Error!?[]const u8 {
         const res = iter.str[start..end];
 
         // If we already have something in `list` that means that we could not
@@ -266,8 +272,8 @@ pub const ShellIterator = struct {
     }
 };
 
-fn testShellIteratorOk(str: []const u8, allocations: usize, expect: []const []const u8) void {
-    var allocator = try testing.FailingAllocator.init(try testing.allocator, allocations);
+fn testShellIteratorOk(str: []const u8, allocations: usize, expect: []const []const u8) !void {
+    var allocator = testing.FailingAllocator.init(testing.allocator, allocations);
     var it = ShellIterator.init(&allocator.allocator, str);
     defer it.deinit();
 
@@ -284,8 +290,8 @@ fn testShellIteratorOk(str: []const u8, allocations: usize, expect: []const []co
     } else |err| try testing.expectEqual(@as(anyerror!void, {}), err);
 }
 
-fn testShellIteratorErr(str: []const u8, expect: anyerror) void {
-    var it = ShellIterator.init(try testing.allocator, str);
+fn testShellIteratorErr(str: []const u8, expect: anyerror) !void {
+    var it = ShellIterator.init(testing.allocator, str);
     defer it.deinit();
 
     while (it.next() catch |err| {
@@ -297,45 +303,45 @@ fn testShellIteratorErr(str: []const u8, expect: anyerror) void {
 }
 
 test "ShellIterator" {
-    testShellIteratorOk("a", 0, &[_][]const u8{"a"});
-    testShellIteratorOk("'a'", 0, &[_][]const u8{"a"});
-    testShellIteratorOk("\"a\"", 0, &[_][]const u8{"a"});
-    testShellIteratorOk("a b", 0, &[_][]const u8{ "a", "b" });
-    testShellIteratorOk("'a' b", 0, &[_][]const u8{ "a", "b" });
-    testShellIteratorOk("\"a\" b", 0, &[_][]const u8{ "a", "b" });
-    testShellIteratorOk("a 'b'", 0, &[_][]const u8{ "a", "b" });
-    testShellIteratorOk("a \"b\"", 0, &[_][]const u8{ "a", "b" });
-    testShellIteratorOk("'a b'", 0, &[_][]const u8{"a b"});
-    testShellIteratorOk("\"a b\"", 0, &[_][]const u8{"a b"});
-    testShellIteratorOk("\"a\"\"b\"", 1, &[_][]const u8{"ab"});
-    testShellIteratorOk("'a''b'", 1, &[_][]const u8{"ab"});
-    testShellIteratorOk("'a'b", 1, &[_][]const u8{"ab"});
-    testShellIteratorOk("a'b'", 1, &[_][]const u8{"ab"});
-    testShellIteratorOk("a\\ b", 1, &[_][]const u8{"a b"});
-    testShellIteratorOk("\"a\\ b\"", 1, &[_][]const u8{"a b"});
-    testShellIteratorOk("'a\\ b'", 0, &[_][]const u8{"a\\ b"});
-    testShellIteratorOk("   a     b      ", 0, &[_][]const u8{ "a", "b" });
-    testShellIteratorOk("\\  \\ ", 0, &[_][]const u8{ " ", " " });
+    try testShellIteratorOk("a", 0, &.{"a"});
+    try testShellIteratorOk("'a'", 0, &.{"a"});
+    try testShellIteratorOk("\"a\"", 0, &.{"a"});
+    try testShellIteratorOk("a b", 0, &.{ "a", "b" });
+    try testShellIteratorOk("'a' b", 0, &.{ "a", "b" });
+    try testShellIteratorOk("\"a\" b", 0, &.{ "a", "b" });
+    try testShellIteratorOk("a 'b'", 0, &.{ "a", "b" });
+    try testShellIteratorOk("a \"b\"", 0, &.{ "a", "b" });
+    try testShellIteratorOk("'a b'", 0, &.{"a b"});
+    try testShellIteratorOk("\"a b\"", 0, &.{"a b"});
+    try testShellIteratorOk("\"a\"\"b\"", 1, &.{"ab"});
+    try testShellIteratorOk("'a''b'", 1, &.{"ab"});
+    try testShellIteratorOk("'a'b", 1, &.{"ab"});
+    try testShellIteratorOk("a'b'", 1, &.{"ab"});
+    try testShellIteratorOk("a\\ b", 1, &.{"a b"});
+    try testShellIteratorOk("\"a\\ b\"", 1, &.{"a b"});
+    try testShellIteratorOk("'a\\ b'", 0, &.{"a\\ b"});
+    try testShellIteratorOk("   a     b      ", 0, &.{ "a", "b" });
+    try testShellIteratorOk("\\  \\ ", 0, &.{ " ", " " });
 
-    testShellIteratorOk(
+    try testShellIteratorOk(
         \\printf 'run\nuninstall\n'
-    , 0, &[_][]const u8{ "printf", "run\\nuninstall\\n" });
-    testShellIteratorOk(
+    , 0, &.{ "printf", "run\\nuninstall\\n" });
+    try testShellIteratorOk(
         \\setsid -f steam "steam://$action/$id"
-    , 0, &[_][]const u8{ "setsid", "-f", "steam", "steam://$action/$id" });
-    testShellIteratorOk(
+    , 0, &.{ "setsid", "-f", "steam", "steam://$action/$id" });
+    try testShellIteratorOk(
         \\xargs -I% rg --no-heading --no-line-number --only-matching
         \\    --case-sensitive --multiline --text --byte-offset '(?-u)%' $@
         \\
-    , 0, &[_][]const u8{
+    , 0, &.{
         "xargs",            "-I%",             "rg",               "--no-heading",
         "--no-line-number", "--only-matching", "--case-sensitive", "--multiline",
         "--text",           "--byte-offset",   "(?-u)%",           "$@",
     });
 
-    testShellIteratorErr("'a", error.QuoteNotClosed);
-    testShellIteratorErr("'a\\", error.QuoteNotClosed);
-    testShellIteratorErr("\"a", error.QuoteNotClosed);
-    testShellIteratorErr("\"a\\", error.QuoteNotClosed);
-    testShellIteratorErr("a\\", error.DanglingEscape);
+    try testShellIteratorErr("'a", error.QuoteNotClosed);
+    try testShellIteratorErr("'a\\", error.QuoteNotClosed);
+    try testShellIteratorErr("\"a", error.QuoteNotClosed);
+    try testShellIteratorErr("\"a\\", error.QuoteNotClosed);
+    try testShellIteratorErr("a\\", error.DanglingEscape);
 }

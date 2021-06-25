@@ -6,6 +6,7 @@ const debug = std.debug;
 const fs = std.fs;
 const fmt = std.fmt;
 const heap = std.heap;
+const io = std.io;
 const math = std.math;
 const mem = std.mem;
 const os = std.os;
@@ -183,7 +184,7 @@ fn convertToSsh(pk: PublicKey) !void {
     const key_id_prefix = "minisign key ";
     var full_ssh_key: [key_type.len + 1 + encoded_ssh_key.len + 1 + key_id_prefix.len + 16 + 1]u8 = undefined;
     _ = try fmt.bufPrint(&full_ssh_key, "{s} {s} {s}{X}\n", .{ key_type, encoded_ssh_key, key_id_prefix, mem.readIntLittle(u64, &pk.key_id) });
-    const fd = std.io.getStdOut();
+    const fd = io.getStdOut();
     _ = try fd.write(&full_ssh_key);
 }
 
@@ -201,16 +202,19 @@ const params = params: {
 };
 
 fn usage() noreturn {
-    var out = std.io.getStdErr().writer();
+    var out = io.getStdErr().writer();
     out.writeAll("Usage:\n") catch unreachable;
     clap.help(out, &params) catch unreachable;
     os.exit(1);
 }
 
 fn doit(gpa_allocator: *mem.Allocator) !void {
-    var diag: clap.Diagnostic = undefined;
-    var args = clap.parse(clap.Help, &params, gpa_allocator, &diag) catch |err| {
-        diag.report(std.io.getStdErr().writer(), err) catch {};
+    var diag = clap.Diagnostic{};
+    var args = clap.parse(clap.Help, &params, .{
+        .allocator = gpa_allocator,
+        .diagnostic = &diag,
+    }) catch |err| {
+        diag.report(io.getStdErr().writer(), err) catch {};
         os.exit(1);
     };
     defer args.deinit();
