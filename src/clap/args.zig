@@ -35,7 +35,7 @@ pub const SliceIterator = struct {
 };
 
 test "SliceIterator" {
-    const args = [_][]const u8{ "A", "BB", "CCC" };
+    const args = .{ "A", "BB", "CCC" };
     var iter = SliceIterator{ .args = &args };
 
     for (args) |a| {
