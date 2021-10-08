@@ -129,14 +129,15 @@ const PublicKey = struct {
         return PublicKey.decode(pk_str);
     }
 
-    fn verify(self: PublicKey, allocator: *mem.Allocator, fd: fs.File, sig: Signature) !void {
+    fn verify(self: PublicKey, allocator: *mem.Allocator, fd: fs.File, sig: Signature, prehash: ?bool) !void {
         const null_key_id = mem.zeroes([self.key_id.len]u8);
         if (!mem.eql(u8, &null_key_id, &self.key_id) and !mem.eql(u8, &sig.key_id, &self.key_id)) {
             std.debug.print("Signature was made using a different key\n", .{});
             return error.KeyIdMismatch;
         }
         const signature_algorithm = sig.signature_algorithm;
-        const prehashed = if (signature_algorithm[0] == 0x45 and signature_algorithm[1] == 0x64) false else if (signature_algorithm[0] == 0x45 and signature_algorithm[1] == 0x44) true else return error.UnsupportedAlgorithm;
+        const prehashed = prehash orelse
+            if (signature_algorithm[0] == 0x45 and signature_algorithm[1] == 0x64) false else if (signature_algorithm[0] == 0x45 and signature_algorithm[1] == 0x44) true else return error.UnsupportedAlgorithm;
         var digest: [64]u8 = undefined;
         if (prehashed) {
             var h = Blake2b512.init(.{});
@@ -163,10 +164,10 @@ const PublicKey = struct {
     }
 };
 
-fn verify(allocator: *mem.Allocator, pk: PublicKey, path: []const u8, sig: Signature) !void {
+fn verify(allocator: *mem.Allocator, pk: PublicKey, path: []const u8, sig: Signature, prehash: ?bool) !void {
     const fd = try fs.cwd().openFile(path, .{ .read = true });
     defer fd.close();
-    try pk.verify(allocator, fd, sig);
+    try pk.verify(allocator, fd, sig, prehash);
 }
 
 fn convertToSsh(pk: PublicKey) !void {
@@ -192,6 +193,7 @@ const params = params: {
     @setEvalBranchQuota(10000);
     break :params [_]clap.Param(clap.Help){
         clap.parseParam("-h, --help                  Display this help and exit") catch unreachable,
+        clap.parseParam("-H, --prehash               Always prehash the input") catch unreachable,
         clap.parseParam("-p, --publickey-path <PATH> Public key path to a file") catch unreachable,
         clap.parseParam("-P, --publickey <STRING>    Public key, as a BASE64-encoded string") catch unreachable,
         clap.parseParam("-m, --input <PATH>          Input file") catch unreachable,
@@ -221,6 +223,7 @@ fn doit(gpa_allocator: *mem.Allocator) !void {
 
     if (args.flag("--help")) usage();
     const quiet = args.flag("--quiet");
+    const prehash: ?bool = if (args.flag("--prehash")) true else null;
     const pk_b64 = args.option("--publickey");
     const pk_path = args.option("--publickey-path");
     const input_path = args.option("--input");
@@ -242,7 +245,7 @@ fn doit(gpa_allocator: *mem.Allocator) !void {
     defer arena.deinit();
     const sig_path = try fmt.allocPrint(&arena.allocator, "{s}.minisig", .{input_path});
     const sig = try Signature.fromFile(&arena.allocator, sig_path);
-    if (verify(&arena.allocator, pk, input_path.?, sig)) {
+    if (verify(&arena.allocator, pk, input_path.?, sig, prehash)) {
         if (!quiet) {
             debug.print("Signature and comment signature verified\nTrusted comment: {s}\n", .{sig.trusted_comment});
         }
