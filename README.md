@@ -27,6 +27,7 @@ for a speed-optimized version.
 ```text
 Usage:
 	-h, --help                 	Display this help and exit
+	-H, --prehash               Always prehash the input
 	-p, --publickey-path <PATH>	Public key path to a file
 	-P, --publickey <STRING>   	Public key, as a BASE64-encoded string
 	-m, --input <PATH>         	Input file
@@ -65,4 +66,4 @@ SSH-encoded keys can be loaded by `minizign` the same way as native keys, with `
 
 ## Features
 
-`minizign` supports prehashing, has zero dependencies and can be cross-compiled to anything that Zig can cross-compile to, including WebAssembly.
+`minizign` supports prehashing (which can be forced if you know this is how the signature was created), has zero dependencies and can be cross-compiled to anything that Zig can cross-compile to, including WebAssembly.
