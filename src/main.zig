@@ -136,8 +136,12 @@ const PublicKey = struct {
             return error.KeyIdMismatch;
         }
         const signature_algorithm = sig.signature_algorithm;
-        const prehashed = prehash orelse
-            if (signature_algorithm[0] == 0x45 and signature_algorithm[1] == 0x64) false else if (signature_algorithm[0] == 0x45 and signature_algorithm[1] == 0x44) true else return error.UnsupportedAlgorithm;
+        const prehashed = if (signature_algorithm[0] == 0x45 and signature_algorithm[1] == 0x64) false else if (signature_algorithm[0] == 0x45 and signature_algorithm[1] == 0x44) true else return error.UnsupportedAlgorithm;
+        if (prehash) |want_prehashed| {
+            if (prehashed != want_prehashed) {
+                return error.SignatureVerificationFailed;
+            }
+        }
         var digest: [64]u8 = undefined;
         if (prehashed) {
             var h = Blake2b512.init(.{});
