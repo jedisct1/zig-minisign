@@ -182,10 +182,12 @@ const PublicKey = struct {
 };
 
 fn verify(allocator: *mem.Allocator, pks: []const PublicKey, path: []const u8, sig: Signature, prehash: ?bool) !void {
-    for (pks) |pk| {
+    var i: usize = pks.len;
+    while (i > 0) {
+        i -= 1;
         const fd = try fs.cwd().openFile(path, .{ .read = true });
         defer fd.close();
-        if (pk.verify(allocator, fd, sig, prehash)) |_| {
+        if (pks[i].verify(allocator, fd, sig, prehash)) |_| {
             return;
         } else |_| {}
     }
