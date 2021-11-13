@@ -62,6 +62,8 @@ minizign -p minisign.pub -C
 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHmlYecO4IzT51TGPpvWucNSCh1CBM0QTaLn73Y7GFO3 minisign key E7620F1842B4E81F
 ```
 
+GitHub makes public SSH keys available at `https://github.com/<username>.keys`.
+
 SSH-encoded keys can be loaded by `minizign` the same way as native keys, with `-p <key file>`. They will be automatically recognized as such.
 
 ## Features
