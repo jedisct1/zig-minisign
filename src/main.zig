@@ -86,9 +86,9 @@ const PublicKey = struct {
         return pk;
     }
 
-    fn decodeFromSsh(lines: []const u8) !PublicKey {
+    fn decodeFromSsh(pks: []PublicKey, lines: []const u8) ![]PublicKey {
         var lines_it = mem.tokenize(u8, lines, "\n");
-        var xpk: ?PublicKey = null;
+        var i: usize = 0;
         while (lines_it.next()) |line| {
             var pk = PublicKey{ .key_id = mem.zeroes([8]u8), .key = undefined };
             const key_type = "ssh-ed25519";
@@ -114,25 +114,32 @@ const PublicKey = struct {
             if (mem.startsWith(u8, rest, key_id_prefix) and rest.len > key_id_prefix.len) {
                 mem.writeIntLittle(u64, &pk.key_id, try fmt.parseInt(u64, rest[key_id_prefix.len..], 16));
             }
-            xpk = pk;
+            pks[i] = pk;
+            i += 1;
+            if (i == pks.len) break;
         }
-        return xpk orelse error.InvalidEncoding;
+        if (i == 0) {
+            return error.InvalidEncoding;
+        }
+        return pks[0..i];
     }
 
-    fn decode(lines_str: []const u8) !PublicKey {
-        if (decodeFromSsh(lines_str)) |pk| return pk else |_| {}
+    fn decode(pks: []PublicKey, lines_str: []const u8) ![]PublicKey {
+        if (decodeFromSsh(pks, lines_str)) |pks_| return pks_ else |_| {}
 
         var it = mem.tokenize(u8, lines_str, "\n");
         _ = it.next() orelse return error.InvalidEncoding;
-        return fromBase64(it.next() orelse return error.InvalidEncoding);
+        const pk = try fromBase64(it.next() orelse return error.InvalidEncoding);
+        pks[0] = pk;
+        return pks[0..1];
     }
 
-    fn fromFile(allocator: *mem.Allocator, path: []const u8) !PublicKey {
+    fn fromFile(allocator: *mem.Allocator, pks: []PublicKey, path: []const u8) ![]PublicKey {
         const fd = try fs.cwd().openFile(path, .{ .read = true });
         defer fd.close();
         const pk_str = try fd.readToEndAlloc(allocator, 4096);
         defer allocator.free(pk_str);
-        return PublicKey.decode(pk_str);
+        return PublicKey.decode(pks, pk_str);
     }
 
     fn verify(self: PublicKey, allocator: *mem.Allocator, fd: fs.File, sig: Signature, prehash: ?bool) !void {
@@ -174,10 +181,15 @@ const PublicKey = struct {
     }
 };
 
-fn verify(allocator: *mem.Allocator, pk: PublicKey, path: []const u8, sig: Signature, prehash: ?bool) !void {
-    const fd = try fs.cwd().openFile(path, .{ .read = true });
-    defer fd.close();
-    try pk.verify(allocator, fd, sig, prehash);
+fn verify(allocator: *mem.Allocator, pks: []const PublicKey, path: []const u8, sig: Signature, prehash: ?bool) !void {
+    for (pks) |pk| {
+        const fd = try fs.cwd().openFile(path, .{ .read = true });
+        defer fd.close();
+        if (pk.verify(allocator, fd, sig, prehash)) |_| {
+            return;
+        } else |_| {}
+    }
+    return error.SignatureVerificationFailed;
 }
 
 fn convertToSsh(pk: PublicKey) !void {
@@ -241,21 +253,24 @@ fn doit(gpa_allocator: *mem.Allocator) !void {
     if (pk_path == null and pk_b64 == null) {
         usage();
     }
-    const pk = if (pk_b64) |b64| try PublicKey.fromBase64(b64) else try PublicKey.fromFile(gpa_allocator, pk_path.?);
+    var pks_buf: [64]PublicKey = undefined;
+    const pks = if (pk_b64) |b64| blk: {
+        pks_buf[0] = try PublicKey.fromBase64(b64);
+        break :blk pks_buf[0..1];
+    } else try PublicKey.fromFile(gpa_allocator, &pks_buf, pk_path.?);
 
     if (args.flag("--convert")) {
-        return convertToSsh(pk);
+        return convertToSsh(pks[0]);
     }
 
     if (input_path == null) {
         usage();
     }
-
     var arena = heap.ArenaAllocator.init(gpa_allocator);
     defer arena.deinit();
     const sig_path = try fmt.allocPrint(&arena.allocator, "{s}.minisig", .{input_path});
     const sig = try Signature.fromFile(&arena.allocator, sig_path);
-    if (verify(&arena.allocator, pk, input_path.?, sig, prehash)) {
+    if (verify(&arena.allocator, pks, input_path.?, sig, prehash)) {
         if (!quiet) {
             debug.print("Signature and comment signature verified\nTrusted comment: {s}\n", .{sig.trusted_comment});
         }
