@@ -69,6 +69,9 @@ const PublicKey = struct {
     key: [32]u8,
 
     fn fromBase64(str: []const u8) !PublicKey {
+        if (str.len != 56) {
+            return error.InvalidEncoding;
+        }
         var bin: [42]u8 = undefined;
         try base64.standard_decoder.decode(&bin, str);
         const signature_algorithm = bin[0..2];
@@ -83,34 +86,37 @@ const PublicKey = struct {
         return pk;
     }
 
-    fn decodeFromSsh(line: []const u8) !PublicKey {
-        var pk = PublicKey{ .key_id = mem.zeroes([8]u8), .key = undefined };
-        const key_type = "ssh-ed25519";
+    fn decodeFromSsh(lines: []const u8) !PublicKey {
+        var lines_it = mem.tokenize(u8, lines, "\n");
+        var xpk: ?PublicKey = null;
+        while (lines_it.next()) |line| {
+            var pk = PublicKey{ .key_id = mem.zeroes([8]u8), .key = undefined };
+            const key_type = "ssh-ed25519";
 
-        var it = mem.tokenize(u8, line, " ");
-        const header = it.next() orelse return error.InvalidEncoding;
-        if (!mem.eql(u8, key_type, header)) {
-            return error.InvalidEncoding;
-        }
-        const encoded_ssh_key = it.next() orelse return error.InvalidEncoding;
-        var ssh_key: [4 + key_type.len + 4 + pk.key.len]u8 = undefined;
-        try base64.standard.Decoder.decode(&ssh_key, encoded_ssh_key);
-        if (mem.readIntBig(u32, ssh_key[0..4]) != key_type.len or
-            !mem.eql(u8, ssh_key[4..][0..key_type.len], key_type) or
-            mem.readIntBig(u32, ssh_key[4 + key_type.len ..][0..4]) != pk.key.len)
-        {
-            return error.InvalidEncoding;
-        }
-        mem.copy(u8, &pk.key, ssh_key[4 + key_type.len + 4 ..]);
+            var it = mem.tokenize(u8, line, " ");
+            const header = it.next() orelse return error.InvalidEncoding;
+            if (!mem.eql(u8, key_type, header)) {
+                return error.InvalidEncoding;
+            }
+            const encoded_ssh_key = it.next() orelse return error.InvalidEncoding;
+            var ssh_key: [4 + key_type.len + 4 + pk.key.len]u8 = undefined;
+            try base64.standard.Decoder.decode(&ssh_key, encoded_ssh_key);
+            if (mem.readIntBig(u32, ssh_key[0..4]) != key_type.len or
+                !mem.eql(u8, ssh_key[4..][0..key_type.len], key_type) or
+                mem.readIntBig(u32, ssh_key[4 + key_type.len ..][0..4]) != pk.key.len)
+            {
+                return error.InvalidEncoding;
+            }
+            mem.copy(u8, &pk.key, ssh_key[4 + key_type.len + 4 ..]);
 
-        const rest = mem.trim(u8, it.rest(), " \t\r\n");
-        const key_id_prefix = "minisign key ";
-        if (!mem.startsWith(u8, rest, key_id_prefix)) {
-            return pk;
+            const rest = mem.trim(u8, it.rest(), " \t\r\n");
+            const key_id_prefix = "minisign key ";
+            if (mem.startsWith(u8, rest, key_id_prefix) and rest.len > key_id_prefix.len) {
+                mem.writeIntLittle(u64, &pk.key_id, try fmt.parseInt(u64, rest[key_id_prefix.len..], 16));
+            }
+            xpk = pk;
         }
-        mem.writeIntLittle(u64, &pk.key_id, try fmt.parseInt(u64, rest[key_id_prefix.len..], 16));
-
-        return pk;
+        return xpk orelse error.InvalidEncoding;
     }
 
     fn decode(lines_str: []const u8) !PublicKey {
