@@ -27,7 +27,7 @@ const Signature = struct {
         self.arena.deinit();
     }
 
-    fn decode(child_allocator: *mem.Allocator, lines_str: []const u8) !Signature {
+    fn decode(child_allocator: mem.Allocator, lines_str: []const u8) !Signature {
         var arena = heap.ArenaAllocator.init(child_allocator);
         errdefer arena.deinit();
         var it = mem.tokenize(u8, lines_str, "\n");
@@ -40,20 +40,20 @@ const Signature = struct {
         }
         trusted_comment = trusted_comment["Trusted comment: ".len..];
         var bin2: [64]u8 = undefined;
-        try base64.standard_decoder.decode(&bin2, it.next() orelse return error.InvalidEncoding);
+        try base64.standard.Decoder.decode(&bin2, it.next() orelse return error.InvalidEncoding);
         const sig = Signature{
             .arena = arena,
-            .untrusted_comment = try mem.dupe(&arena.allocator, u8, untrusted_comment),
+            .untrusted_comment = try arena.allocator().dupe(u8, untrusted_comment),
             .signature_algorithm = bin1[0..2].*,
             .key_id = bin1[2..10].*,
             .signature = bin1[10..74].*,
-            .trusted_comment = try mem.dupe(&arena.allocator, u8, trusted_comment),
+            .trusted_comment = try arena.allocator().dupe(u8, trusted_comment),
             .global_signature = bin2,
         };
         return sig;
     }
 
-    fn fromFile(allocator: *mem.Allocator, path: []const u8) !Signature {
+    fn fromFile(allocator: mem.Allocator, path: []const u8) !Signature {
         const fd = try fs.cwd().openFile(path, .{ .read = true });
         defer fd.close();
         const sig_str = try fd.readToEndAlloc(allocator, 4096);
@@ -73,7 +73,7 @@ const PublicKey = struct {
             return error.InvalidEncoding;
         }
         var bin: [42]u8 = undefined;
-        try base64.standard_decoder.decode(&bin, str);
+        try base64.standard.Decoder.decode(&bin, str);
         const signature_algorithm = bin[0..2];
         if (bin[0] != 0x45 or (bin[1] != 0x64 and bin[1] != 0x44)) {
             return error.UnsupportedAlgorithm;
@@ -134,7 +134,7 @@ const PublicKey = struct {
         return pks[0..1];
     }
 
-    fn fromFile(allocator: *mem.Allocator, pks: []PublicKey, path: []const u8) ![]PublicKey {
+    fn fromFile(allocator: mem.Allocator, pks: []PublicKey, path: []const u8) ![]PublicKey {
         const fd = try fs.cwd().openFile(path, .{ .read = true });
         defer fd.close();
         const pk_str = try fd.readToEndAlloc(allocator, 4096);
@@ -142,7 +142,7 @@ const PublicKey = struct {
         return PublicKey.decode(pks, pk_str);
     }
 
-    fn verify(self: PublicKey, allocator: *mem.Allocator, fd: fs.File, sig: Signature, prehash: ?bool) !void {
+    fn verify(self: PublicKey, allocator: mem.Allocator, fd: fs.File, sig: Signature, prehash: ?bool) !void {
         const null_key_id = mem.zeroes([self.key_id.len]u8);
         if (!mem.eql(u8, &null_key_id, &self.key_id) and !mem.eql(u8, &sig.key_id, &self.key_id)) {
             std.debug.print("Signature was made using a different key\n", .{});
@@ -181,7 +181,7 @@ const PublicKey = struct {
     }
 };
 
-fn verify(allocator: *mem.Allocator, pks: []const PublicKey, path: []const u8, sig: Signature, prehash: ?bool) !void {
+fn verify(allocator: mem.Allocator, pks: []const PublicKey, path: []const u8, sig: Signature, prehash: ?bool) !void {
     var i: usize = pks.len;
     while (i > 0) {
         i -= 1;
@@ -234,7 +234,7 @@ fn usage() noreturn {
     os.exit(1);
 }
 
-fn doit(gpa_allocator: *mem.Allocator) !void {
+fn doit(gpa_allocator: mem.Allocator) !void {
     var diag = clap.Diagnostic{};
     var args = clap.parse(clap.Help, &params, .{
         .allocator = gpa_allocator,
@@ -270,9 +270,9 @@ fn doit(gpa_allocator: *mem.Allocator) !void {
     }
     var arena = heap.ArenaAllocator.init(gpa_allocator);
     defer arena.deinit();
-    const sig_path = try fmt.allocPrint(&arena.allocator, "{s}.minisig", .{input_path});
-    const sig = try Signature.fromFile(&arena.allocator, sig_path);
-    if (verify(&arena.allocator, pks, input_path.?, sig, prehash)) {
+    const sig_path = try fmt.allocPrint(arena.allocator(), "{s}.minisig", .{input_path});
+    const sig = try Signature.fromFile(arena.allocator(), sig_path);
+    if (verify(arena.allocator(), pks, input_path.?, sig, prehash)) {
         if (!quiet) {
             debug.print("Signature and comment signature verified\nTrusted comment: {s}\n", .{sig.trusted_comment});
         }
@@ -287,5 +287,5 @@ fn doit(gpa_allocator: *mem.Allocator) !void {
 pub fn main() !void {
     var gpa = heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
-    try doit(&gpa.allocator);
+    try doit(gpa.allocator());
 }
