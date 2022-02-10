@@ -54,7 +54,7 @@ const Signature = struct {
     }
 
     fn fromFile(allocator: mem.Allocator, path: []const u8) !Signature {
-        const fd = try fs.cwd().openFile(path, .{ .read = true });
+        const fd = try fs.cwd().openFile(path, .{ .mode = .read_only });
         defer fd.close();
         const sig_str = try fd.readToEndAlloc(allocator, 4096);
         defer allocator.free(sig_str);
@@ -135,7 +135,7 @@ const PublicKey = struct {
     }
 
     fn fromFile(allocator: mem.Allocator, pks: []PublicKey, path: []const u8) ![]PublicKey {
-        const fd = try fs.cwd().openFile(path, .{ .read = true });
+        const fd = try fs.cwd().openFile(path, .{ .mode = .read_only });
         defer fd.close();
         const pk_str = try fd.readToEndAlloc(allocator, 4096);
         defer allocator.free(pk_str);
@@ -185,7 +185,7 @@ fn verify(allocator: mem.Allocator, pks: []const PublicKey, path: []const u8, si
     var i: usize = pks.len;
     while (i > 0) {
         i -= 1;
-        const fd = try fs.cwd().openFile(path, .{ .read = true });
+        const fd = try fs.cwd().openFile(path, .{ .mode = .read_only });
         defer fd.close();
         if (pks[i].verify(allocator, fd, sig, prehash)) |_| {
             return;

@@ -4,6 +4,7 @@ const debug = std.debug;
 const heap = std.heap;
 const io = std.io;
 const mem = std.mem;
+const process = std.process;
 const testing = std.testing;
 
 pub const args = @import("clap/args.zig");
@@ -347,16 +348,21 @@ pub fn parse(
     comptime params: []const Param(Id),
     opt: ParseOptions,
 ) !Args(Id, params) {
-    var iter = try args.OsIterator.init(opt.allocator);
+    var arena = heap.ArenaAllocator.init(opt.allocator);
+    errdefer arena.deinit();
+
+    var iter = try process.ArgIterator.initWithAllocator(arena.allocator());
+    const exe_arg = iter.next();
+
     const clap = try parseEx(Id, params, &iter, .{
         // Let's reuse the arena from the `OSIterator` since we already have it.
-        .allocator = iter.arena.allocator(),
+        .allocator = arena.allocator(),
         .diagnostic = opt.diagnostic,
     });
 
     return Args(Id, params){
-        .exe_arg = iter.exe_arg,
-        .arena = iter.arena,
+        .exe_arg = exe_arg,
+        .arena = arena,
         .clap = clap,
     };
 }
@@ -405,18 +411,21 @@ pub fn helpFull(
             continue;
 
         var cs = io.countingWriter(stream);
-        try stream.print("\t", .{});
+        try stream.writeAll("\t");
         try printParam(cs.writer(), Id, param, Error, context, valueText);
         try stream.writeByteNTimes(' ', max_spacing - @intCast(usize, cs.bytes_written));
+
         const help_text = try helpText(context, param);
         var help_text_line_it = mem.split(u8, help_text, "\n");
         var indent_line = false;
         while (help_text_line_it.next()) |line| : (indent_line = true) {
             if (indent_line) {
-                try stream.print("\t", .{});
+                try stream.writeAll("\t");
                 try stream.writeByteNTimes(' ', max_spacing);
             }
-            try stream.print("\t{s}\n", .{line});
+            try stream.writeAll("\t");
+            try stream.writeAll(line);
+            try stream.writeAll("\n");
         }
     }
 }
@@ -430,25 +439,29 @@ fn printParam(
     valueText: fn (@TypeOf(context), Param(Id)) Error![]const u8,
 ) !void {
     if (param.names.short) |s| {
-        try stream.print("-{c}", .{s});
+        try stream.writeAll(&[_]u8{ '-', s });
     } else {
-        try stream.print("  ", .{});
+        try stream.writeAll("  ");
     }
     if (param.names.long) |l| {
         if (param.names.short) |_| {
-            try stream.print(", ", .{});
+            try stream.writeAll(", ");
         } else {
-            try stream.print("  ", .{});
+            try stream.writeAll("  ");
         }
 
-        try stream.print("--{s}", .{l});
+        try stream.writeAll("--");
+        try stream.writeAll(l);
     }
 
-    switch (param.takes_value) {
-        .none => {},
-        .one => try stream.print(" <{s}>", .{valueText(context, param)}),
-        .many => try stream.print(" <{s}>...", .{valueText(context, param)}),
-    }
+    if (param.takes_value == .none)
+        return;
+
+    try stream.writeAll(" <");
+    try stream.writeAll(try valueText(context, param));
+    try stream.writeAll(">");
+    if (param.takes_value == .many)
+        try stream.writeAll("...");
 }
 
 /// A wrapper around helpFull for simple helpText and valueText functions that
@@ -567,7 +580,7 @@ pub fn usageFull(
         try cs.writeByte(name);
     }
     if (cos.bytes_written != 0)
-        try cs.writeByte(']');
+        try cs.writeAll("]");
 
     var positional: ?Param(Id) = null;
     for (params) |param| {
@@ -587,13 +600,17 @@ pub fn usageFull(
             };
 
         if (cos.bytes_written != 0)
-            try cs.writeByte(' ');
+            try cs.writeAll(" ");
 
-        try cs.print("[{s}{s}", .{ prefix, name });
-        switch (param.takes_value) {
-            .none => {},
-            .one => try cs.print(" <{s}>", .{try valueText(context, param)}),
-            .many => try cs.print(" <{s}>...", .{try valueText(context, param)}),
+        try cs.writeAll("[");
+        try cs.writeAll(prefix);
+        try cs.writeAll(name);
+        if (param.takes_value != .none) {
+            try cs.writeAll(" <");
+            try cs.writeAll(try valueText(context, param));
+            try cs.writeAll(">");
+            if (param.takes_value == .many)
+                try cs.writeAll("...");
         }
 
         try cs.writeByte(']');
@@ -601,8 +618,11 @@ pub fn usageFull(
 
     if (positional) |p| {
         if (cos.bytes_written != 0)
-            try cs.writeByte(' ');
-        try cs.print("<{s}>", .{try valueText(context, p)});
+            try cs.writeAll(" ");
+
+        try cs.writeAll("<");
+        try cs.writeAll(try valueText(context, p));
+        try cs.writeAll(">");
     }
 }
 
