@@ -124,7 +124,7 @@ const PublicKey = struct {
         return pks[0..i];
     }
 
-    fn decode(pks: []PublicKey, lines_str: []const u8) ![]PublicKey {
+     fn decode(pks: []PublicKey, lines_str: []const u8) ![]PublicKey {
         if (decodeFromSsh(pks, lines_str)) |pks_| return pks_ else |_| {}
 
         var it = mem.tokenize(u8, lines_str, "\n");
@@ -239,7 +239,7 @@ fn doit(gpa_allocator: mem.Allocator) !void {
     var args = clap.parse(clap.Help, &params, .{
         .allocator = gpa_allocator,
         .diagnostic = &diag,
-    }) catch |err| {
+    }, .{}) catch |err| {
         diag.report(io.getStdErr().writer(), err) catch {};
         os.exit(1);
     };
