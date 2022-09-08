@@ -124,7 +124,7 @@ const PublicKey = struct {
         return pks[0..i];
     }
 
-     fn decode(pks: []PublicKey, lines_str: []const u8) ![]PublicKey {
+    fn decode(pks: []PublicKey, lines_str: []const u8) ![]PublicKey {
         if (decodeFromSsh(pks, lines_str)) |pks_| return pks_ else |_| {}
 
         var it = mem.tokenize(u8, lines_str, "\n");
@@ -143,7 +143,8 @@ const PublicKey = struct {
     }
 
     fn verify(self: PublicKey, allocator: mem.Allocator, fd: fs.File, sig: Signature, prehash: ?bool) !void {
-        const null_key_id = mem.zeroes([self.key_id.len]u8);
+        const key_id_len = self.key_id.len;
+        const null_key_id = mem.zeroes([key_id_len]u8);
         if (!mem.eql(u8, &null_key_id, &self.key_id) and !mem.eql(u8, &sig.key_id, &self.key_id)) {
             std.debug.print("Signature was made using a different key\n", .{});
             return error.KeyIdMismatch;
@@ -230,27 +231,30 @@ const params = params: {
 fn usage() noreturn {
     var out = io.getStdErr().writer();
     out.writeAll("Usage:\n") catch unreachable;
-    clap.help(out, &params) catch unreachable;
+    clap.help(out, clap.Help, &params, .{}) catch unreachable;
     os.exit(1);
 }
 
 fn doit(gpa_allocator: mem.Allocator) !void {
     var diag = clap.Diagnostic{};
-    var args = clap.parse(clap.Help, &params, .{
+    var res = clap.parse(clap.Help, &params, .{
+        .PATH = clap.parsers.string,
+        .STRING = clap.parsers.string,
+    }, .{
         .allocator = gpa_allocator,
         .diagnostic = &diag,
-    }, .{}) catch |err| {
+    }) catch |err| {
         diag.report(io.getStdErr().writer(), err) catch {};
         os.exit(1);
     };
-    defer args.deinit();
+    defer res.deinit();
 
-    if (args.flag("--help")) usage();
-    const quiet = args.flag("--quiet");
-    const prehash: ?bool = if (args.flag("--prehash")) true else null;
-    const pk_b64 = args.option("--publickey");
-    const pk_path = args.option("--publickey-path");
-    const input_path = args.option("--input");
+    if (res.args.help) usage();
+    const quiet = res.args.quiet;
+    const prehash: ?bool = if (res.args.prehash) true else null;
+    const pk_b64 = res.args.publickey;
+    const pk_path = @field(res.args, "publickey-path");
+    const input_path = res.args.input;
 
     if (pk_path == null and pk_b64 == null) {
         usage();
@@ -261,7 +265,7 @@ fn doit(gpa_allocator: mem.Allocator) !void {
         break :blk pks_buf[0..1];
     } else try PublicKey.fromFile(gpa_allocator, &pks_buf, pk_path.?);
 
-    if (args.flag("--convert")) {
+    if (res.args.convert) {
         return convertToSsh(pks[0]);
     }
 
@@ -270,7 +274,7 @@ fn doit(gpa_allocator: mem.Allocator) !void {
     }
     var arena = heap.ArenaAllocator.init(gpa_allocator);
     defer arena.deinit();
-    const sig_path = try fmt.allocPrint(arena.allocator(), "{s}.minisig", .{input_path});
+    const sig_path = try fmt.allocPrint(arena.allocator(), "{s}.minisig", .{input_path.?});
     const sig = try Signature.fromFile(arena.allocator(), sig_path);
     if (verify(arena.allocator(), pks, input_path.?, sig, prehash)) {
         if (!quiet) {
