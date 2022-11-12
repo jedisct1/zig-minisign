@@ -157,6 +157,7 @@ const PublicKey = struct {
             }
         }
         var digest: [64]u8 = undefined;
+        const ed25519_pk = try Ed25519.PublicKey.fromBytes(self.key);
         if (prehashed) {
             var h = Blake2b512.init(.{});
             var buf: [mem.page_size]u8 = undefined;
@@ -168,17 +169,17 @@ const PublicKey = struct {
                 h.update(buf[0..read_nb]);
             }
             h.final(&digest);
-            try Ed25519.verify(sig.signature, &digest, self.key);
+            try Ed25519.Signature.fromBytes(sig.signature).verify(&digest, ed25519_pk);
         } else {
             var buf = try fd.readToEndAlloc(allocator, math.maxInt(usize));
             defer allocator.free(buf);
-            try Ed25519.verify(sig.signature, buf, self.key);
+            try Ed25519.Signature.fromBytes(sig.signature).verify(buf, ed25519_pk);
         }
         var global = try allocator.alloc(u8, sig.signature.len + sig.trusted_comment.len);
         defer allocator.free(global);
         mem.copy(u8, global[0..sig.signature.len], sig.signature[0..]);
         mem.copy(u8, global[sig.signature.len..], sig.trusted_comment);
-        try Ed25519.verify(sig.global_signature, global, self.key);
+        try Ed25519.Signature.fromBytes(sig.global_signature).verify(global, ed25519_pk);
     }
 };
 
