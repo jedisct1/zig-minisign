@@ -27,9 +27,9 @@ for a speed-optimized version.
 ```text
 Usage:
     -h, --help                  Display this help and exit
-    -H, --prehash               Always prehash the input
     -p, --publickey-path <PATH> Public key path to a file
     -P, --publickey <STRING>    Public key, as a BASE64-encoded string
+    -l, --legacy                Accept legacy signatures
     -m, --input <PATH>          Input file
     -q, --quiet                 Quiet mode
     -V, --verify                Verify

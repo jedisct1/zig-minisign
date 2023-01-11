@@ -219,9 +219,9 @@ const params = params: {
     @setEvalBranchQuota(10000);
     break :params [_]clap.Param(clap.Help){
         clap.parseParam("-h, --help                  Display this help and exit") catch unreachable,
-        clap.parseParam("-H, --prehash               Always prehash the input") catch unreachable,
         clap.parseParam("-p, --publickey-path <PATH> Public key path to a file") catch unreachable,
         clap.parseParam("-P, --publickey <STRING>    Public key, as a BASE64-encoded string") catch unreachable,
+        clap.parseParam("-l, --legacy                Accept legacy signatures") catch unreachable,
         clap.parseParam("-m, --input <PATH>          Input file") catch unreachable,
         clap.parseParam("-q, --quiet                 Quiet mode") catch unreachable,
         clap.parseParam("-V, --verify                Verify") catch unreachable,
@@ -252,7 +252,7 @@ fn doit(gpa_allocator: mem.Allocator) !void {
 
     if (res.args.help) usage();
     const quiet = res.args.quiet;
-    const prehash: ?bool = if (res.args.prehash) true else null;
+    const prehash: ?bool = if (res.args.legacy) null else true;
     const pk_b64 = res.args.publickey;
     const pk_path = @field(res.args, "publickey-path");
     const input_path = res.args.input;
