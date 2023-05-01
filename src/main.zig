@@ -99,7 +99,8 @@ const PublicKey = struct {
                 return error.InvalidEncoding;
             }
             const encoded_ssh_key = it.next() orelse return error.InvalidEncoding;
-            var ssh_key: [4 + key_type.len + 4 + pk.key.len]u8 = undefined;
+            const pk_len = pk.key.len;
+            var ssh_key: [4 + key_type.len + 4 + pk_len]u8 = undefined;
             try base64.standard.Decoder.decode(&ssh_key, encoded_ssh_key);
             if (mem.readIntBig(u32, ssh_key[0..4]) != key_type.len or
                 !mem.eql(u8, ssh_key[4..][0..key_type.len], key_type) or
@@ -198,7 +199,8 @@ fn verify(allocator: mem.Allocator, pks: []const PublicKey, path: []const u8, si
 
 fn convertToSsh(pk: PublicKey) !void {
     const key_type = "ssh-ed25519";
-    var ssh_key: [4 + key_type.len + 4 + pk.key.len]u8 = undefined;
+    const pk_len = pk.key.len;
+    var ssh_key: [4 + key_type.len + 4 + pk_len]u8 = undefined;
     mem.writeIntBig(u32, ssh_key[0..4], key_type.len);
     mem.copy(u8, ssh_key[4..], key_type);
     mem.writeIntBig(u32, ssh_key[4 + key_type.len ..][0..4], pk.key.len);
