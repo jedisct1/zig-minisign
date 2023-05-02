@@ -11,13 +11,13 @@ Requires the current `master` version of [Zig](https://ziglang.org).
 Compile with:
 
 ```sh
-zig build -Drelease-small
+zig build -Doptimize=ReleaseSmall
 ```
 
 for a size-optimized version, or
 
 ```sh
-zig build -Drelease-fast
+zig build -Doptimize=ReleaseFast
 ```
 
 for a speed-optimized version.
