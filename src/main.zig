@@ -108,7 +108,7 @@ const PublicKey = struct {
             {
                 return error.InvalidEncoding;
             }
-            mem.copy(u8, &pk.key, ssh_key[4 + key_type.len + 4 ..]);
+            mem.copyForwards(u8, &pk.key, ssh_key[4 + key_type.len + 4 ..]);
 
             const rest = mem.trim(u8, it.rest(), " \t\r\n");
             const key_id_prefix = "minisign key ";
@@ -178,8 +178,8 @@ const PublicKey = struct {
         }
         var global = try allocator.alloc(u8, sig.signature.len + sig.trusted_comment.len);
         defer allocator.free(global);
-        mem.copy(u8, global[0..sig.signature.len], sig.signature[0..]);
-        mem.copy(u8, global[sig.signature.len..], sig.trusted_comment);
+        mem.copyForwards(u8, global[0..sig.signature.len], sig.signature[0..]);
+        mem.copyForwards(u8, global[sig.signature.len..], sig.trusted_comment);
         try Ed25519.Signature.fromBytes(sig.global_signature).verify(global, ed25519_pk);
     }
 };
@@ -202,9 +202,9 @@ fn convertToSsh(pk: PublicKey) !void {
     const pk_len = pk.key.len;
     var ssh_key: [4 + key_type.len + 4 + pk_len]u8 = undefined;
     mem.writeIntBig(u32, ssh_key[0..4], key_type.len);
-    mem.copy(u8, ssh_key[4..], key_type);
+    mem.copyForwards(u8, ssh_key[4..], key_type);
     mem.writeIntBig(u32, ssh_key[4 + key_type.len ..][0..4], pk.key.len);
-    mem.copy(u8, ssh_key[4 + key_type.len + 4 ..], &pk.key);
+    mem.copyForwards(u8, ssh_key[4 + key_type.len + 4 ..], &pk.key);
 
     const Base64Encoder = base64.standard.Encoder;
     var encoded_ssh_key: [Base64Encoder.calcSize(ssh_key.len)]u8 = undefined;
