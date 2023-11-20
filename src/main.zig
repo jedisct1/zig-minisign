@@ -13,6 +13,7 @@ const os = std.os;
 const process = std.process;
 const Blake2b512 = crypto.hash.blake2.Blake2b512;
 const Ed25519 = crypto.sign.Ed25519;
+const Endian = std.builtin.Endian;
 
 const Signature = struct {
     arena: heap.ArenaAllocator,
@@ -102,9 +103,9 @@ const PublicKey = struct {
             const pk_len = pk.key.len;
             var ssh_key: [4 + key_type.len + 4 + pk_len]u8 = undefined;
             try base64.standard.Decoder.decode(&ssh_key, encoded_ssh_key);
-            if (mem.readIntBig(u32, ssh_key[0..4]) != key_type.len or
+            if (mem.readInt(u32, ssh_key[0..4], Endian.big) != key_type.len or
                 !mem.eql(u8, ssh_key[4..][0..key_type.len], key_type) or
-                mem.readIntBig(u32, ssh_key[4 + key_type.len ..][0..4]) != pk.key.len)
+                mem.readInt(u32, ssh_key[4 + key_type.len ..][0..4], Endian.big) != pk.key.len)
             {
                 return error.InvalidEncoding;
             }
@@ -113,7 +114,7 @@ const PublicKey = struct {
             const rest = mem.trim(u8, it.rest(), " \t\r\n");
             const key_id_prefix = "minisign key ";
             if (mem.startsWith(u8, rest, key_id_prefix) and rest.len > key_id_prefix.len) {
-                mem.writeIntLittle(u64, &pk.key_id, try fmt.parseInt(u64, rest[key_id_prefix.len..], 16));
+                mem.writeInt(u64, &pk.key_id, try fmt.parseInt(u64, rest[key_id_prefix.len..], 16), Endian.little);
             }
             pks[i] = pk;
             i += 1;
@@ -201,9 +202,9 @@ fn convertToSsh(pk: PublicKey) !void {
     const key_type = "ssh-ed25519";
     const pk_len = pk.key.len;
     var ssh_key: [4 + key_type.len + 4 + pk_len]u8 = undefined;
-    mem.writeIntBig(u32, ssh_key[0..4], key_type.len);
+    mem.writeInt(u32, ssh_key[0..4], key_type.len, Endian.big);
     mem.copyForwards(u8, ssh_key[4..], key_type);
-    mem.writeIntBig(u32, ssh_key[4 + key_type.len ..][0..4], pk.key.len);
+    mem.writeInt(u32, ssh_key[4 + key_type.len ..][0..4], pk.key.len, Endian.big);
     mem.copyForwards(u8, ssh_key[4 + key_type.len + 4 ..], &pk.key);
 
     const Base64Encoder = base64.standard.Encoder;
@@ -212,7 +213,7 @@ fn convertToSsh(pk: PublicKey) !void {
 
     const key_id_prefix = "minisign key ";
     var full_ssh_key: [key_type.len + 1 + encoded_ssh_key.len + 1 + key_id_prefix.len + 16 + 1]u8 = undefined;
-    _ = try fmt.bufPrint(&full_ssh_key, "{s} {s} {s}{X}\n", .{ key_type, encoded_ssh_key, key_id_prefix, mem.readIntLittle(u64, &pk.key_id) });
+    _ = try fmt.bufPrint(&full_ssh_key, "{s} {s} {s}{X}\n", .{ key_type, encoded_ssh_key, key_id_prefix, mem.readInt(u64, &pk.key_id, Endian.little) });
     const fd = io.getStdOut();
     _ = try fd.write(&full_ssh_key);
 }
