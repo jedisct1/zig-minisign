@@ -173,7 +173,7 @@ const PublicKey = struct {
             h.final(&digest);
             try Ed25519.Signature.fromBytes(sig.signature).verify(&digest, ed25519_pk);
         } else {
-            var buf = try fd.readToEndAlloc(allocator, math.maxInt(usize));
+            const buf = try fd.readToEndAlloc(allocator, math.maxInt(usize));
             defer allocator.free(buf);
             try Ed25519.Signature.fromBytes(sig.signature).verify(buf, ed25519_pk);
         }
