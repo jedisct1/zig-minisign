@@ -30,11 +30,8 @@ pub const Names = struct {
     pub fn longest(names: *const Names) Longest {
         if (names.long) |long|
             return .{ .kind = .long, .name = long };
-        if (names.short) |*short| {
-            // TODO: Zig cannot figure out @as(*const [1]u8, short) in the ano literal
-            const casted: *const [1]u8 = short;
-            return .{ .kind = .short, .name = casted };
-        }
+        if (names.short) |*short|
+            return .{ .kind = .short, .name = @as(*const [1]u8, short) };
 
         return .{ .kind = .positional, .name = "" };
     }
@@ -79,7 +76,7 @@ pub const Values = enum {
 ///         * "-abc=value"
 ///         * "-abcvalue"
 ///   * Long ("--long-param"): Should be used for less common parameters, or when no single
-///                            character can describe the paramter.
+///                            character can describe the parameter.
 ///     * They can take a value two different ways.
 ///       * "--long-param value"
 ///       * "--long-param=value"
@@ -644,12 +641,7 @@ test "Diagnostic.report" {
 
 /// Options that can be set to customize the behavior of parsing.
 pub const ParseOptions = struct {
-    /// The allocator used for all memory allocations. Defaults to the `heap.page_allocator`.
-    /// Note: You should probably override this allocator if you are calling `parseEx`. Unlike
-    ///       `parse`, `parseEx` does not wrap the allocator so the heap allocator can be
-    ///       quite expensive. (TODO: Can we pick a better default? For `parse`, this allocator
-    ///       is fine, as it wraps it in an arena)
-    allocator: mem.Allocator = heap.page_allocator,
+    allocator: mem.Allocator,
     diagnostic: ?*Diagnostic = null,
 };
 
@@ -722,7 +714,7 @@ pub fn Result(
 /// `T` can be any type and `Error` can be any error. You can pass `clap.parsers.default` if you
 /// just wonna get something up and running.
 ///
-/// Caller ownes the result and should free it by calling `result.deinit()`
+/// Caller owns the result and should free it by calling `result.deinit()`
 pub fn parseEx(
     comptime Id: type,
     comptime params: []const Param(Id),
@@ -744,7 +736,7 @@ pub fn parseEx(
     };
     while (try stream.next()) |arg| {
         // TODO: We cannot use `try` inside the inline for because of a compiler bug that
-        //       generates an infinit loop. For now, use a variable to store the error
+        //       generates an infinite loop. For now, use a variable to store the error
         //       and use `try` outside. The downside of this is that we have to use
         //       `anyerror` :(
         var res: anyerror!void = {};
@@ -801,13 +793,14 @@ fn parseArg(
     };
 
     const longest = comptime param.names.longest();
+    const name = longest.name[0..longest.name.len].*;
     switch (longest.kind) {
         .short, .long => switch (param.takes_value) {
-            .none => @field(arguments, longest.name) = true,
-            .one => @field(arguments, longest.name) = try parser(arg.value.?),
+            .none => @field(arguments, &name) +|= 1,
+            .one => @field(arguments, &name) = try parser(arg.value.?),
             .many => {
                 const value = try parser(arg.value.?);
-                try @field(arguments, longest.name).append(allocator, value);
+                try @field(arguments, &name).append(allocator, value);
             },
         },
         .positional => try positionals.append(try parser(arg.value.?)),
@@ -895,7 +888,7 @@ const MultiArgKind = enum { slice, list };
 
 /// Turn a list of parameters into a struct with one field for each none positional parameter.
 /// The type of each parameter field is determined by `ParamType`. Positional arguments will not
-/// havea field in this struct.
+/// have a field in this struct.
 fn Arguments(
     comptime Id: type,
     comptime params: []const Param(Id),
@@ -912,7 +905,7 @@ fn Arguments(
 
         const T = ParamType(Id, param, value_parsers);
         const default_value = switch (param.takes_value) {
-            .none => false,
+            .none => @as(u8, 0),
             .one => @as(?T, null),
             .many => switch (multi_arg_kind) {
                 .slice => @as([]const T, &[_]T{}),
@@ -920,10 +913,11 @@ fn Arguments(
             },
         };
 
+        const name = longest.name[0..longest.name.len] ++ ""; // Adds null terminator
         fields[i] = .{
-            .name = longest.name,
+            .name = name,
             .type = @TypeOf(default_value),
-            .default_value = @as(*const anyopaque, @ptrCast(&default_value)),
+            .default_value = @ptrCast(&default_value),
             .is_comptime = false,
             .alignment = @alignOf(@TypeOf(default_value)),
         };
@@ -960,24 +954,42 @@ test "everything" {
         \\-b, --bb
         \\-c, --cc <str>
         \\-d, --dd <usize>...
+        \\-h
         \\<str>
         \\
     );
 
     var iter = args.SliceIterator{
-        .args = &.{ "-a", "-c", "0", "something", "-d", "1", "--dd", "2" },
+        .args = &.{ "-a", "--aa", "-c", "0", "something", "-d", "1", "--dd", "2", "-h" },
     };
     var res = try parseEx(Help, &params, parsers.default, &iter, .{
         .allocator = testing.allocator,
     });
     defer res.deinit();
 
-    try testing.expect(res.args.aa);
-    try testing.expect(!res.args.bb);
+    try testing.expect(res.args.aa == 2);
+    try testing.expect(res.args.bb == 0);
+    try testing.expect(res.args.h == 1);
     try testing.expectEqualStrings("0", res.args.cc.?);
     try testing.expectEqual(@as(usize, 1), res.positionals.len);
     try testing.expectEqualStrings("something", res.positionals[0]);
     try testing.expectEqualSlices(usize, &.{ 1, 2 }, res.args.dd);
+}
+
+test "overflow-safe" {
+    const params = comptime parseParamsComptime(
+        \\-a, --aa
+    );
+
+    var iter = args.SliceIterator{
+        .args = &(.{"-" ++ ("a" ** 300)}),
+    };
+
+    // This just needs to not crash
+    var res = try parseEx(Help, &params, parsers.default, &iter, .{
+        .allocator = testing.allocator,
+    });
+    defer res.deinit();
 }
 
 test "empty" {
@@ -1045,11 +1057,11 @@ pub const Help = struct {
 
 pub const HelpOptions = struct {
     /// Render the description of a parameter in a simular way to how markdown would render
-    /// such a string. This means that single newlines wont be respected unless followed by
+    /// such a string. This means that single newlines won't be respected unless followed by
     /// bullet points or other markdown elements.
     markdown_lite: bool = true,
 
-    /// Wether `help` should print the description of a parameter on a new line instead of after
+    /// Whether `help` should print the description of a parameter on a new line instead of after
     /// the parameter names. This options works together with `description_indent` to change
     /// where descriptions are printed.
     ///
@@ -1071,7 +1083,7 @@ pub const HelpOptions = struct {
     /// changes the output.
     description_indent: usize = 8,
 
-    /// How much to indent each paramter.
+    /// How much to indent each parameter.
     ///
     /// indent=0, description_on_new_line=false, description_indent=4
     ///
@@ -1088,7 +1100,7 @@ pub const HelpOptions = struct {
     indent: usize = 4,
 
     /// The maximum width of the help message. `help` will try to break the description of
-    /// paramters into multiple lines if they exeed this maximum. Setting this to the width
+    /// parameters into multiple lines if they exceed this maximum. Setting this to the width
     /// of the terminal is a nice way of using this option.
     max_width: usize = std.math.maxInt(usize),
 
@@ -1114,7 +1126,7 @@ pub fn help(
             var cs = io.countingWriter(io.null_writer);
             try printParam(cs.writer(), Id, param);
             if (res < cs.bytes_written)
-                res = @as(usize, @intCast(cs.bytes_written));
+                res = @intCast(cs.bytes_written);
         }
 
         break :blk res;
@@ -1126,8 +1138,6 @@ pub fn help(
 
     var first_paramter: bool = true;
     for (params) |param| {
-        if (param.names.longest().kind == .positional)
-            continue;
         if (!first_paramter)
             try writer.writeByteNTimes('\n', opt.spacing_between_parameters);
 
@@ -1141,7 +1151,7 @@ pub fn help(
         var description_writer = Writer{
             .underlying_writer = writer,
             .indentation = description_indentation,
-            .printed_chars = @as(usize, @intCast(cw.bytes_written)),
+            .printed_chars = @intCast(cw.bytes_written),
             .max_width = opt.max_width,
         };
 
@@ -1292,21 +1302,26 @@ fn printParam(
     comptime Id: type,
     param: Param(Id),
 ) !void {
-    try stream.writeAll(&[_]u8{
-        if (param.names.short) |_| '-' else ' ',
-        param.names.short orelse ' ',
-    });
+    if (param.names.short != null or param.names.long != null) {
+        try stream.writeAll(&[_]u8{
+            if (param.names.short) |_| '-' else ' ',
+            param.names.short orelse ' ',
+        });
 
-    if (param.names.long) |l| {
-        try stream.writeByte(if (param.names.short) |_| ',' else ' ');
-        try stream.writeAll(" --");
-        try stream.writeAll(l);
+        if (param.names.long) |l| {
+            try stream.writeByte(if (param.names.short) |_| ',' else ' ');
+            try stream.writeAll(" --");
+            try stream.writeAll(l);
+        }
+
+        if (param.takes_value != .none)
+            try stream.writeAll(" ");
     }
 
     if (param.takes_value == .none)
         return;
 
-    try stream.writeAll(" <");
+    try stream.writeAll("<");
     try stream.writeAll(param.id.value());
     try stream.writeAll(">");
     if (param.takes_value == .many)
@@ -1355,6 +1370,12 @@ test "clap.help" {
         \\
         \\    -d, --dd <V3>...
         \\            Both repeated option.
+        \\
+        \\    <A>
+        \\            Help text
+        \\
+        \\    <B>...
+        \\            Another help text
         \\
     );
 
@@ -1715,21 +1736,21 @@ pub fn usage(stream: anytype, comptime Id: type, params: []const Param(Id)) !voi
     if (cos.bytes_written != 0)
         try cs.writeAll("]");
 
-    var positional: ?Param(Id) = null;
+    var has_positionals: bool = false;
     for (params) |param| {
         if (param.takes_value == .none and param.names.short != null)
             continue;
 
         const prefix = if (param.names.short) |_| "-" else "--";
-        const name = if (param.names.short) |*s|
-            // Seems the zig compiler is being a little wierd. I doesn't allow me to write
-            // @as(*const [1]u8, s)
-            @as([*]const u8, @ptrCast(s))[0..1]
-        else
-            param.names.long orelse {
-                positional = param;
-                continue;
-            };
+        const name = blk: {
+            if (param.names.short) |*s|
+                break :blk @as(*const [1]u8, s);
+            if (param.names.long) |l|
+                break :blk l;
+
+            has_positionals = true;
+            continue;
+        };
 
         if (cos.bytes_written != 0)
             try cs.writeAll(" ");
@@ -1748,14 +1769,20 @@ pub fn usage(stream: anytype, comptime Id: type, params: []const Param(Id)) !voi
         try cs.writeByte(']');
     }
 
-    if (positional) |p| {
+    if (!has_positionals)
+        return;
+
+    for (params) |param| {
+        if (param.names.short != null or param.names.long != null)
+            continue;
+
         if (cos.bytes_written != 0)
             try cs.writeAll(" ");
 
         try cs.writeAll("<");
-        try cs.writeAll(p.id.value());
+        try cs.writeAll(param.id.value());
         try cs.writeAll(">");
-        if (p.takes_value == .many)
+        if (param.takes_value == .many)
             try cs.writeAll("...");
     }
 }
@@ -1813,4 +1840,16 @@ test "usage" {
             \\
         ),
     );
+    try testUsage("<number> <file> <file>", &comptime parseParamsComptime(
+        \\<number>
+        \\<file>
+        \\<file>
+        \\
+    ));
+    try testUsage("<number> <outfile> <infile>...", &comptime parseParamsComptime(
+        \\<number>
+        \\<outfile>
+        \\<infile>...
+        \\
+    ));
 }

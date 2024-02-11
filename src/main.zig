@@ -253,9 +253,9 @@ fn doit(gpa_allocator: mem.Allocator) !void {
     };
     defer res.deinit();
 
-    if (res.args.help) usage();
+    if (res.args.help != 0) usage();
     const quiet = res.args.quiet;
-    const prehash: ?bool = if (res.args.legacy) null else true;
+    const prehash: ?bool = if (res.args.legacy != 0) null else true;
     const pk_b64 = res.args.publickey;
     const pk_path = @field(res.args, "publickey-path");
     const input_path = res.args.input;
@@ -269,7 +269,7 @@ fn doit(gpa_allocator: mem.Allocator) !void {
         break :blk pks_buf[0..1];
     } else try PublicKey.fromFile(gpa_allocator, &pks_buf, pk_path.?);
 
-    if (res.args.convert) {
+    if (res.args.convert != 0) {
         return convertToSsh(pks[0]);
     }
 
@@ -281,11 +281,11 @@ fn doit(gpa_allocator: mem.Allocator) !void {
     const sig_path = try fmt.allocPrint(arena.allocator(), "{s}.minisig", .{input_path.?});
     const sig = try Signature.fromFile(arena.allocator(), sig_path);
     if (verify(arena.allocator(), pks, input_path.?, sig, prehash)) {
-        if (!quiet) {
+        if (quiet == 0) {
             debug.print("Signature and comment signature verified\nTrusted comment: {s}\n", .{sig.trusted_comment});
         }
     } else |_| {
-        if (!quiet) {
+        if (quiet == 0) {
             debug.print("Signature verification failed\n", .{});
         }
         os.exit(1);
