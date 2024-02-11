@@ -218,19 +218,16 @@ fn convertToSsh(pk: PublicKey) !void {
     _ = try fd.write(&full_ssh_key);
 }
 
-const params = params: {
-    @setEvalBranchQuota(10000);
-    break :params [_]clap.Param(clap.Help){
-        clap.parseParam("-h, --help                  Display this help and exit") catch unreachable,
-        clap.parseParam("-p, --publickey-path <PATH> Public key path to a file") catch unreachable,
-        clap.parseParam("-P, --publickey <STRING>    Public key, as a BASE64-encoded string") catch unreachable,
-        clap.parseParam("-l, --legacy                Accept legacy signatures") catch unreachable,
-        clap.parseParam("-m, --input <PATH>          Input file") catch unreachable,
-        clap.parseParam("-q, --quiet                 Quiet mode") catch unreachable,
-        clap.parseParam("-V, --verify                Verify") catch unreachable,
-        clap.parseParam("-C, --convert               Convert the given public key to SSH format") catch unreachable,
-    };
-};
+const params = clap.parseParamsComptime(
+    \\ -h, --help                  Display this help and exit
+    \\ -p, --publickey-path <PATH> Public key path to a file
+    \\ -P, --publickey <STRING>    Public key, as a BASE64-encoded string
+    \\ -l, --legacy                Accept legacy signatures
+    \\ -m, --input <PATH>          Input file
+    \\ -q, --quiet                 Quiet mode
+    \\ -V, --verify                Verify
+    \\ -C, --convert               Convert the given public key to SSH format
+);
 
 fn usage() noreturn {
     var out = io.getStdErr().writer();
