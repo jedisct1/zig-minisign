@@ -9,7 +9,6 @@ const heap = std.heap;
 const io = std.io;
 const math = std.math;
 const mem = std.mem;
-const os = std.os;
 const process = std.process;
 const Blake2b512 = crypto.hash.blake2.Blake2b512;
 const Ed25519 = crypto.sign.Ed25519;
@@ -233,7 +232,7 @@ fn usage() noreturn {
     var out = io.getStdErr().writer();
     out.writeAll("Usage:\n") catch unreachable;
     clap.help(out, clap.Help, &params, .{}) catch unreachable;
-    os.exit(1);
+    process.exit(1);
 }
 
 fn doit(gpa_allocator: mem.Allocator) !void {
@@ -246,7 +245,7 @@ fn doit(gpa_allocator: mem.Allocator) !void {
         .diagnostic = &diag,
     }) catch |err| {
         diag.report(io.getStdErr().writer(), err) catch {};
-        os.exit(1);
+        process.exit(1);
     };
     defer res.deinit();
 
@@ -285,7 +284,7 @@ fn doit(gpa_allocator: mem.Allocator) !void {
         if (quiet == 0) {
             debug.print("Signature verification failed\n", .{});
         }
-        os.exit(1);
+        process.exit(1);
     }
 }
 
