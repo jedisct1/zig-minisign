@@ -76,7 +76,7 @@ pub const PublicKey = struct {
     key_id: [8]u8,
     key: [32]u8,
 
-    pub fn fromBase64(str: []const u8) !PublicKey {
+    pub fn decodeFromBase64(str: []const u8) !PublicKey {
         if (str.len != 56) {
             return error.InvalidEncoding;
         }
@@ -138,7 +138,7 @@ pub const PublicKey = struct {
 
         var it = mem.tokenize(u8, lines_str, "\n");
         _ = it.next() orelse return error.InvalidEncoding;
-        const pk = try fromBase64(it.next() orelse return error.InvalidEncoding);
+        const pk = try decodeFromBase64(it.next() orelse return error.InvalidEncoding);
         pks[0] = pk;
         return pks[0..1];
     }

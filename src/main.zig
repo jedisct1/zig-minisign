@@ -15,7 +15,7 @@ const Blake2b512 = crypto.hash.blake2.Blake2b512;
 const Ed25519 = crypto.sign.Ed25519;
 const Endian = std.builtin.Endian;
 
-const lib = @import("lib.zig");
+const lib = @import("minizign");
 const PublicKey = lib.PublicKey;
 const Signature = lib.Signature;
 
@@ -96,7 +96,7 @@ fn doit(gpa_allocator: mem.Allocator) !void {
     }
     var pks_buf: [64]PublicKey = undefined;
     const pks = if (pk_b64) |b64| blk: {
-        pks_buf[0] = try PublicKey.fromBase64(b64);
+        pks_buf[0] = try PublicKey.decodeFromBase64(b64);
         break :blk pks_buf[0..1];
     } else try PublicKey.fromFile(gpa_allocator, &pks_buf, pk_path.?);
 

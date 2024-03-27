@@ -1,5 +1,5 @@
 const std = @import("std");
-const lib = @import("lib.zig");
+const lib = @import("minizign");
 const PublicKey = lib.PublicKey;
 const Signature = lib.Signature;
 const Verifier = lib.Verifier;
@@ -18,8 +18,10 @@ pub const Result = enum(isize) {
     NonCanonical = -9,
     IdentityElement = -10,
     WeakPublicKey = -11,
+    Overflow = -12,
     _,
 
+    // Assert that none of the error code values are positive.
     comptime {
         const type_info = @typeInfo(Result);
         for (type_info.Enum.fields) |field| {
@@ -29,6 +31,8 @@ pub const Result = enum(isize) {
         }
     }
 
+    /// Given a pointer, convert it first to an integer, and then to the
+    /// Result enum type. Asserts the highest bit is *not* set.
     fn fromPointer(ptr: *anyopaque) Result {
         const int: usize = @intFromPtr(ptr);
 
@@ -75,33 +79,30 @@ export fn signatureDecode(str: [*]const u8, len: u32) Result {
     return Result.fromPointer(sig);
 }
 
-export fn signatureGetTrustedComment(sig: *const Signature) Result {
-    const slice = alloc.alloc(u32, 2) catch |e| switch (e) {
-        error.OutOfMemory => return .OutOfMemory,
-    };
-    slice[0] = @intFromPtr(sig.trusted_comment.ptr);
-    slice[1] = sig.trusted_comment.len;
-    return Result.fromPointer(slice.ptr);
+/// Returns the pointer to the signatures trusted comment.
+export fn signatureGetTrustedComment(sig: *const Signature) [*]const u8 {
+    return sig.trusted_comment.ptr;
 }
 
-export fn signatureFreeTrustedComment(slice: *[2]u32) void {
-    alloc.free(slice);
+/// Returns the length of the signatures trusted comment.
+export fn signatureGetTrustedCommentLength(sig: *const Signature) usize {
+    return sig.trusted_comment.len;
 }
 
-/// De-initializes a signature object
+/// De-initializes a signature object from a call to signatureDecode.
 export fn signatureDeinit(sig: *Signature) void {
     sig.deinit();
 }
 
 /// Takes a base64 encoded string and creates a PublicKey object in the provided buffer.
 /// On success, returns the number of bytes used. On failure, returns 0.
-export fn publicKeyFromBase64(str: [*]const u8, len: u32) Result {
+export fn publicKeyDecodeFromBase64(str: [*]const u8, len: u32) Result {
     const pk = struct {
         fn impl(str_: [*]const u8, len_: u32) !*PublicKey {
             const pk: *PublicKey = try alloc.create(PublicKey);
             errdefer alloc.destroy(pk);
 
-            pk.* = try PublicKey.fromBase64(str_[0..len_]);
+            pk.* = try PublicKey.decodeFromBase64(str_[0..len_]);
 
             return pk;
         }
@@ -117,11 +118,31 @@ export fn publicKeyFromBase64(str: [*]const u8, len: u32) Result {
     return Result.fromPointer(pk);
 }
 
-/// De-initialize a public key object
+/// Initialize a list of public keys from an ssh encoded file.
+/// Returns the number of keys decoded or an error code.
+export fn publicKeyDecodeFromSsh(
+    pks: [*]PublicKey,
+    pksLength: usize,
+    lines: [*]const u8,
+    linesLength: usize,
+) Result {
+    const result = PublicKey.decodeFromSsh(pks[0..pksLength], lines[0..linesLength]) catch |e| switch (e) {
+        error.InvalidEncoding => return .InvalidEncoding,
+        error.InvalidCharacter => return .InvalidCharacter,
+        error.InvalidPadding => return .InvalidPadding,
+        error.NoSpaceLeft => return .NoSpaceLeft,
+        error.Overflow => return .Overflow,
+    };
+    return @enumFromInt(result.len);
+}
+
+/// De-initialize a public key object from a call to any publicKeyDecode* function.
 export fn publicKeyDeinit(pk: *PublicKey) void {
     alloc.destroy(pk);
 }
 
+/// Creates an incremental Verifier struct from the given public key.
+/// Returns a pointer to the struct or an error code.
 export fn publicKeyVerifier(pk: *const PublicKey, sig: *const Signature) Result {
     const verifier = struct {
         fn impl(pk_: *const PublicKey, sig_: *const Signature) !*Verifier {
@@ -144,10 +165,15 @@ export fn publicKeyVerifier(pk: *const PublicKey, sig: *const Signature) Result 
     return Result.fromPointer(verifier);
 }
 
+/// Add bytes to by verified.
 export fn verifierUpdate(verifier: *Verifier, bytes: [*]const u8, length: u32) void {
     verifier.update(bytes[0..length]);
 }
 
+/// Finalizes the hash over bytes previously passed to the verifier through
+/// calls to verifierUpdate and returns a Result value. If negative, an error
+/// has occurred and the file should not be trusted. Otherwise, the result
+/// should be the value 1.
 export fn verifierVerify(verifier: *Verifier) Result {
     verifier.verify(alloc) catch |e| switch (e) {
         error.OutOfMemory => return .OutOfMemory,
@@ -160,6 +186,7 @@ export fn verifierVerify(verifier: *Verifier) Result {
     return @enumFromInt(1);
 }
 
+/// De-initialize a verifier struct from a call to publicKeyVerifier
 export fn verifierDeinit(verifier: *Verifier) void {
     alloc.destroy(verifier);
 }
