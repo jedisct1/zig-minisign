@@ -81,8 +81,7 @@ fn doit(gpa_allocator: mem.Allocator) !void {
     } else try PublicKey.fromFile(gpa_allocator, &pks_buf, pk_path.?);
 
     if (res.args.convert != 0) {
-        var ssh_key: [PublicKey.getSshKeyLength()]u8 = undefined;
-        pks[0].encodeToSsh(&ssh_key);
+        const ssh_key = pks[0].getSshKey();
         const fd = io.getStdOut();
         _ = try fd.write(&ssh_key);
         return;

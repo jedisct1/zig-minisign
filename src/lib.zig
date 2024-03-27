@@ -199,6 +199,12 @@ pub const PublicKey = struct {
         return key_type.len + 1 + encoded_key_len + 1 + key_id_prefix.len + 16 + 1;
     }
 
+    pub fn getSshKey(pk: PublicKey) [getSshKeyLength()]u8 {
+        var ssh_key: [PublicKey.getSshKeyLength()]u8 = undefined;
+        pk.encodeToSsh(&ssh_key);
+        return ssh_key;
+    }
+
     pub fn encodeToSsh(pk: PublicKey, buffer: *[getSshKeyLength()]u8) void {
         var ssh_key: [4 + key_type.len + 4 + key_length]u8 = undefined;
         mem.writeInt(u32, ssh_key[0..4], key_type.len, Endian.big);
