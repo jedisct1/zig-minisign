@@ -74,7 +74,11 @@ pub const PublicKey = struct {
     untrusted_comment: ?[]u8 = null,
     signature_algorithm: [2]u8 = "Ed".*,
     key_id: [8]u8,
-    key: [32]u8,
+    key: [key_length]u8,
+
+    const key_length = 32;
+    const key_type = "ssh-ed25519";
+    const key_id_prefix = "minisign key ";
 
     pub fn decodeFromBase64(str: []const u8) !PublicKey {
         if (str.len != 56) {
@@ -99,7 +103,6 @@ pub const PublicKey = struct {
         var i: usize = 0;
         while (lines_it.next()) |line| {
             var pk = PublicKey{ .key_id = mem.zeroes([8]u8), .key = undefined };
-            const key_type = "ssh-ed25519";
 
             var it = mem.tokenize(u8, line, " ");
             const header = it.next() orelse return error.InvalidEncoding;
@@ -119,7 +122,6 @@ pub const PublicKey = struct {
             mem.copyForwards(u8, &pk.key, ssh_key[4 + key_type.len + 4 ..]);
 
             const rest = mem.trim(u8, it.rest(), " \t\r\n");
-            const key_id_prefix = "minisign key ";
             if (mem.startsWith(u8, rest, key_id_prefix) and rest.len > key_id_prefix.len) {
                 mem.writeInt(u64, &pk.key_id, try fmt.parseInt(u64, rest[key_id_prefix.len..], 16), Endian.little);
             }
@@ -188,6 +190,27 @@ pub const PublicKey = struct {
             v.update(buf[0..read_nb]);
         }
         try v.verify(allocator);
+    }
+
+    pub fn getSshKeyLength() usize {
+        const bin_len = 4 + key_type.len + 4 + key_length;
+        const encoded_key_len = base64.standard.Encoder.calcSize(bin_len);
+
+        return key_type.len + 1 + encoded_key_len + 1 + key_id_prefix.len + 16 + 1;
+    }
+
+    pub fn encodeToSsh(pk: PublicKey, buffer: *[getSshKeyLength()]u8) void {
+        var ssh_key: [4 + key_type.len + 4 + key_length]u8 = undefined;
+        mem.writeInt(u32, ssh_key[0..4], key_type.len, Endian.big);
+        mem.copyForwards(u8, ssh_key[4..], key_type);
+        mem.writeInt(u32, ssh_key[4 + key_type.len ..][0..4], pk.key.len, Endian.big);
+        mem.copyForwards(u8, ssh_key[4 + key_type.len + 4 ..], &pk.key);
+
+        const Base64Encoder = base64.standard.Encoder;
+        var encoded_ssh_key: [Base64Encoder.calcSize(ssh_key.len)]u8 = undefined;
+        _ = Base64Encoder.encode(&encoded_ssh_key, &ssh_key);
+
+        _ = fmt.bufPrint(buffer, "{s} {s} {s}{X}\n", .{ key_type, encoded_ssh_key, key_id_prefix, mem.readInt(u64, &pk.key_id, Endian.little) }) catch unreachable;
     }
 };
 

@@ -32,26 +32,6 @@ fn verify(allocator: mem.Allocator, pks: []const PublicKey, path: []const u8, si
     return error.SignatureVerificationFailed;
 }
 
-fn convertToSsh(pk: PublicKey) !void {
-    const key_type = "ssh-ed25519";
-    const pk_len = pk.key.len;
-    var ssh_key: [4 + key_type.len + 4 + pk_len]u8 = undefined;
-    mem.writeInt(u32, ssh_key[0..4], key_type.len, Endian.big);
-    mem.copyForwards(u8, ssh_key[4..], key_type);
-    mem.writeInt(u32, ssh_key[4 + key_type.len ..][0..4], pk.key.len, Endian.big);
-    mem.copyForwards(u8, ssh_key[4 + key_type.len + 4 ..], &pk.key);
-
-    const Base64Encoder = base64.standard.Encoder;
-    var encoded_ssh_key: [Base64Encoder.calcSize(ssh_key.len)]u8 = undefined;
-    _ = Base64Encoder.encode(&encoded_ssh_key, &ssh_key);
-
-    const key_id_prefix = "minisign key ";
-    var full_ssh_key: [key_type.len + 1 + encoded_ssh_key.len + 1 + key_id_prefix.len + 16 + 1]u8 = undefined;
-    _ = try fmt.bufPrint(&full_ssh_key, "{s} {s} {s}{X}\n", .{ key_type, encoded_ssh_key, key_id_prefix, mem.readInt(u64, &pk.key_id, Endian.little) });
-    const fd = io.getStdOut();
-    _ = try fd.write(&full_ssh_key);
-}
-
 const params = clap.parseParamsComptime(
     \\ -h, --help                  Display this help and exit
     \\ -p, --publickey-path <PATH> Public key path to a file
@@ -101,7 +81,11 @@ fn doit(gpa_allocator: mem.Allocator) !void {
     } else try PublicKey.fromFile(gpa_allocator, &pks_buf, pk_path.?);
 
     if (res.args.convert != 0) {
-        return convertToSsh(pks[0]);
+        var ssh_key: [PublicKey.getSshKeyLength()]u8 = undefined;
+        pks[0].encodeToSsh(&ssh_key);
+        const fd = io.getStdOut();
+        _ = try fd.write(&ssh_key);
+        return;
     }
 
     if (input_path == null) {
