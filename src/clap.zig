@@ -925,7 +925,7 @@ fn Arguments(
     }
 
     return @Type(.{ .Struct = .{
-        .layout = .auto,
+        .layout = .Auto,
         .fields = fields[0..i],
         .decls = &.{},
         .is_tuple = false,
