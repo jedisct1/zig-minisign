@@ -13,7 +13,7 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
 
     const minizign_module = b.addModule("minizign", .{
-        .root_source_file = .{ .path = "src/lib.zig" },
+        .root_source_file = b.path("src/lib.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -22,7 +22,7 @@ pub fn build(b: *std.Build) void {
     {
         const exe = b.addExecutable(.{
             .name = "minizign",
-            .root_source_file = .{ .path = "src/main.zig" },
+            .root_source_file = b.path("src/main.zig"),
             .target = target,
             .optimize = optimize,
         });
@@ -40,51 +40,5 @@ pub fn build(b: *std.Build) void {
 
         const run_step = b.step("run", "Run the app");
         run_step.dependOn(&run_cmd.step);
-    }
-
-    // Build a webassembly module. Does not use the standard optimize and
-    // target options.
-    {
-        const target_wasm32 = b.resolveTargetQuery(.{
-            .cpu_arch = .wasm32,
-            .os_tag = .freestanding,
-        });
-
-        const wasm = b.addExecutable(.{
-            .name = "minizign",
-            .root_source_file = .{ .path = "src/wasm.zig" },
-            .target = target_wasm32,
-            .optimize = .ReleaseSmall,
-        });
-
-        wasm.root_module.addImport("minizign", minizign_module);
-
-        wasm.entry = .disabled;
-        wasm.export_memory = true;
-        wasm.root_module.export_symbol_names = &.{
-            "allocate",
-            "free",
-            "signatureDecode",
-            "signatureGetTrustedComment",
-            "signatureGetTrustedCommentLength",
-            "signatureDeinit",
-            "publicKeyDecodeFromBase64",
-            "publicKeyDecodeFromSsh",
-            "publicKeyDeinit",
-            "publicKeyVerifier",
-            "verifierUpdate",
-            "verifierVerify",
-            "verifierDeinit",
-        };
-
-        const installWasm = b.addInstallArtifact(wasm, .{});
-        b.getInstallStep().dependOn(&installWasm.step);
-
-        const write_files = b.addWriteFiles();
-        write_files.step.dependOn(&wasm.step);
-        write_files.addCopyFileToSource(installWasm.emitted_bin.?, "minizign.wasm");
-
-        const update_module_step = b.step("update-module", "Update the minzign wasm module");
-        update_module_step.dependOn(&write_files.step);
     }
 }
