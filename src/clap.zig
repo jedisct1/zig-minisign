@@ -132,7 +132,7 @@ fn countParams(str: []const u8) usize {
     @setEvalBranchQuota(std.math.maxInt(u32));
 
     var res: usize = 0;
-    var it = mem.split(u8, str, "\n");
+    var it = mem.splitScalar(u8, str, '\n');
     while (it.next()) |line| {
         const trimmed = mem.trimLeft(u8, line, " \t");
         if (mem.startsWith(u8, trimmed, "-") or
@@ -895,8 +895,15 @@ fn Arguments(
     comptime value_parsers: anytype,
     comptime multi_arg_kind: MultiArgKind,
 ) type {
-    var fields: [params.len]builtin.Type.StructField = undefined;
+    var fields_len: usize = 0;
+    for (params) |param| {
+        const longest = param.names.longest();
+        if (longest.kind == .positional)
+            continue;
+        fields_len += 1;
+    }
 
+    var fields: [fields_len]builtin.Type.StructField = undefined;
     var i: usize = 0;
     for (params) |param| {
         const longest = param.names.longest();
@@ -926,7 +933,7 @@ fn Arguments(
 
     return @Type(.{ .Struct = .{
         .layout = .auto,
-        .fields = fields[0..i],
+        .fields = &fields,
         .decls = &.{},
         .is_tuple = false,
     } });
@@ -1163,7 +1170,7 @@ pub fn help(
 
             var first_line = true;
             var res: usize = std.math.maxInt(usize);
-            var it = mem.tokenize(u8, description, "\n");
+            var it = mem.tokenizeScalar(u8, description, '\n');
             while (it.next()) |line| : (first_line = false) {
                 const trimmed = mem.trimLeft(u8, line, " ");
                 const indent = line.len - trimmed.len;
@@ -1188,7 +1195,7 @@ pub fn help(
         };
 
         const description = param.id.description();
-        var it = mem.split(u8, description, "\n");
+        var it = mem.splitScalar(u8, description, '\n');
         var first_line = true;
         var non_emitted_newlines: usize = 0;
         var last_line_indentation: usize = 0;
@@ -1235,7 +1242,7 @@ pub fn help(
                     try description_writer.newline();
             }
 
-            var words = mem.tokenize(u8, line, " ");
+            var words = mem.tokenizeScalar(u8, line, ' ');
             while (words.next()) |word|
                 try description_writer.writeWord(word);
 

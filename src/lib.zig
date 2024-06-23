@@ -38,7 +38,7 @@ pub const Signature = struct {
     pub fn decode(child_allocator: mem.Allocator, lines_str: []const u8) !Signature {
         var arena = heap.ArenaAllocator.init(child_allocator);
         errdefer arena.deinit();
-        var it = mem.tokenize(u8, lines_str, "\n");
+        var it = mem.tokenizeScalar(u8, lines_str, '\n');
         const untrusted_comment = it.next() orelse return error.InvalidEncoding;
         var bin1: [74]u8 = undefined;
         try base64.standard.Decoder.decode(&bin1, it.next() orelse return error.InvalidEncoding);
@@ -99,12 +99,12 @@ pub const PublicKey = struct {
     }
 
     pub fn decodeFromSsh(pks: []PublicKey, lines: []const u8) ![]PublicKey {
-        var lines_it = mem.tokenize(u8, lines, "\n");
+        var lines_it = mem.tokenizeScalar(u8, lines, '\n');
         var i: usize = 0;
         while (lines_it.next()) |line| {
             var pk = PublicKey{ .key_id = mem.zeroes([8]u8), .key = undefined };
 
-            var it = mem.tokenize(u8, line, " ");
+            var it = mem.tokenizeScalar(u8, line, ' ');
             const header = it.next() orelse return error.InvalidEncoding;
             if (!mem.eql(u8, key_type, header)) {
                 return error.InvalidEncoding;
@@ -138,7 +138,7 @@ pub const PublicKey = struct {
     pub fn decode(pks: []PublicKey, lines_str: []const u8) ![]PublicKey {
         if (decodeFromSsh(pks, lines_str)) |pks_| return pks_ else |_| {}
 
-        var it = mem.tokenize(u8, lines_str, "\n");
+        var it = mem.tokenizeScalar(u8, lines_str, '\n');
         _ = it.next() orelse return error.InvalidEncoding;
         const pk = try decodeFromBase64(it.next() orelse return error.InvalidEncoding);
         pks[0] = pk;
