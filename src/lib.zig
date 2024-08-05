@@ -61,6 +61,16 @@ pub const Signature = struct {
         return sig;
     }
 
+    test "decode() does not leak" {
+        var signature = try decode(std.testing.allocator,
+            \\untrusted comment: signature from minisign secret key
+            \\RUSGOq2NVecA2aM2pTseOP756a29t33Ac9gE9f4jZuoXQVXNZ2kYoeVTuKOER5uQNPfZ+SdBa8uSCIyewXIbAaWWltW5ouG/rwQ=
+            \\trusted comment: timestamp:1717729444	file:zig-linux-x86_64-0.13.0.tar.xz	hashed
+            \\7Oots3dd6k0N8skNUp9hoi9cqp1R9Egp4k5AMkj45qLNQ4loF/7fc2L0wtfSdMd3JAE4zrAQSiOx8qj3dEI4DA==
+        );
+        defer signature.deinit();
+    }
+
     pub fn fromFile(allocator: mem.Allocator, path: []const u8) !Signature {
         const fd = try fs.cwd().openFile(path, .{ .mode = .read_only });
         defer fd.close();
@@ -257,3 +267,7 @@ pub const Verifier = struct {
         try Ed25519.Signature.fromBytes(self.sig.global_signature).verify(global, ed25519_pk);
     }
 };
+
+test {
+    _ = Signature;
+}
