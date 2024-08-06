@@ -15,7 +15,7 @@ const Ed25519 = crypto.sign.Ed25519;
 const Endian = std.builtin.Endian;
 
 pub const Signature = struct {
-    allocator: mem.Allocator,
+    arena: heap.ArenaAllocator,
     untrusted_comment: []u8,
     signature_algorithm: [2]u8,
     key_id: [8]u8,
@@ -24,8 +24,7 @@ pub const Signature = struct {
     global_signature: [64]u8,
 
     pub fn deinit(self: *Signature) void {
-        self.allocator.free(self.untrusted_comment);
-        self.allocator.free(self.trusted_comment);
+        self.arena.deinit();
     }
 
     pub const Algorithm = enum { Prehash, Legacy };
@@ -36,7 +35,9 @@ pub const Signature = struct {
         return if (prehashed) .Prehash else .Legacy;
     }
 
-    pub fn decode(allocator: mem.Allocator, lines_str: []const u8) !Signature {
+    pub fn decode(child_allocator: mem.Allocator, lines_str: []const u8) !Signature {
+        var arena = heap.ArenaAllocator.init(child_allocator);
+        errdefer arena.deinit();
         var it = mem.tokenizeScalar(u8, lines_str, '\n');
         const untrusted_comment = it.next() orelse return error.InvalidEncoding;
         var bin1: [74]u8 = undefined;
@@ -48,17 +49,15 @@ pub const Signature = struct {
         trusted_comment = trusted_comment["Trusted comment: ".len..];
         var bin2: [64]u8 = undefined;
         try base64.standard.Decoder.decode(&bin2, it.next() orelse return error.InvalidEncoding);
-        const untrusted_dupe = try allocator.dupe(u8, untrusted_comment);
-        errdefer allocator.free(untrusted_dupe);
-        const trusted_dupe = try allocator.dupe(u8, trusted_comment);
-        errdefer allocator.free(trusted_dupe);
+        const untrusted_comment_dupe = try arena.allocator().dupe(u8, untrusted_comment);
+        const trusted_comment_dupe = try arena.allocator().dupe(u8, trusted_comment);
         const sig = Signature{
-            .allocator = allocator,
-            .untrusted_comment = untrusted_dupe,
+            .arena = arena,
+            .untrusted_comment = untrusted_comment_dupe,
             .signature_algorithm = bin1[0..2].*,
             .key_id = bin1[2..10].*,
             .signature = bin1[10..74].*,
-            .trusted_comment = trusted_dupe,
+            .trusted_comment = trusted_comment_dupe,
             .global_signature = bin2,
         };
         return sig;
