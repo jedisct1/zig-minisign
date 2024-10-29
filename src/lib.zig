@@ -49,16 +49,28 @@ pub const Signature = struct {
         trusted_comment = trusted_comment["Trusted comment: ".len..];
         var bin2: [64]u8 = undefined;
         try base64.standard.Decoder.decode(&bin2, it.next() orelse return error.InvalidEncoding);
+        const untrusted_comment_dupe = try arena.allocator().dupe(u8, untrusted_comment);
+        const trusted_comment_dupe = try arena.allocator().dupe(u8, trusted_comment);
         const sig = Signature{
             .arena = arena,
-            .untrusted_comment = try arena.allocator().dupe(u8, untrusted_comment),
+            .untrusted_comment = untrusted_comment_dupe,
             .signature_algorithm = bin1[0..2].*,
             .key_id = bin1[2..10].*,
             .signature = bin1[10..74].*,
-            .trusted_comment = try arena.allocator().dupe(u8, trusted_comment),
+            .trusted_comment = trusted_comment_dupe,
             .global_signature = bin2,
         };
         return sig;
+    }
+
+    test "decode() does not leak" {
+        var signature = try decode(std.testing.allocator,
+            \\untrusted comment: signature from minisign secret key
+            \\RUSGOq2NVecA2aM2pTseOP756a29t33Ac9gE9f4jZuoXQVXNZ2kYoeVTuKOER5uQNPfZ+SdBa8uSCIyewXIbAaWWltW5ouG/rwQ=
+            \\trusted comment: timestamp:1717729444	file:zig-linux-x86_64-0.13.0.tar.xz	hashed
+            \\7Oots3dd6k0N8skNUp9hoi9cqp1R9Egp4k5AMkj45qLNQ4loF/7fc2L0wtfSdMd3JAE4zrAQSiOx8qj3dEI4DA==
+        );
+        defer signature.deinit();
     }
 
     pub fn fromFile(allocator: mem.Allocator, path: []const u8) !Signature {
@@ -257,3 +269,7 @@ pub const Verifier = struct {
         try Ed25519.Signature.fromBytes(self.sig.global_signature).verify(global, ed25519_pk);
     }
 };
+
+test {
+    _ = Signature;
+}
