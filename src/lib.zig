@@ -38,11 +38,12 @@ pub const Signature = struct {
     pub fn decode(child_allocator: mem.Allocator, lines_str: []const u8) !Signature {
         var arena = heap.ArenaAllocator.init(child_allocator);
         errdefer arena.deinit();
+        const allocator = arena.allocator();
         var it = mem.tokenizeScalar(u8, lines_str, '\n');
-        const untrusted_comment = it.next() orelse return error.InvalidEncoding;
+        const untrusted_comment = try allocator.dupe(u8, it.next() orelse return error.InvalidEncoding);
         var bin1: [74]u8 = undefined;
         try base64.standard.Decoder.decode(&bin1, it.next() orelse return error.InvalidEncoding);
-        var trusted_comment = it.next() orelse return error.InvalidEncoding;
+        var trusted_comment = try allocator.dupe(u8, it.next() orelse return error.InvalidEncoding);
         if (!mem.startsWith(u8, trusted_comment, "trusted comment: ")) {
             return error.InvalidEncoding;
         }
@@ -51,11 +52,11 @@ pub const Signature = struct {
         try base64.standard.Decoder.decode(&bin2, it.next() orelse return error.InvalidEncoding);
         const sig = Signature{
             .arena = arena,
-            .untrusted_comment = try arena.allocator().dupe(u8, untrusted_comment),
+            .untrusted_comment = untrusted_comment,
             .signature_algorithm = bin1[0..2].*,
             .key_id = bin1[2..10].*,
             .signature = bin1[10..74].*,
-            .trusted_comment = try arena.allocator().dupe(u8, trusted_comment),
+            .trusted_comment = trusted_comment,
             .global_signature = bin2,
         };
         return sig;
