@@ -182,7 +182,7 @@ pub const PublicKey = struct {
             }
         }
 
-        var buf: [mem.page_size]u8 = undefined;
+        var buf: [heap.page_size_max]u8 = undefined;
         while (true) {
             const read_nb = try fd.read(&buf);
             if (read_nb == 0) {
