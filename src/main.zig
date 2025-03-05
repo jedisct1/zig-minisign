@@ -106,7 +106,7 @@ fn doit(gpa_allocator: mem.Allocator) !void {
 }
 
 pub fn main() !void {
-    var gpa = heap.GeneralPurposeAllocator(.{}){};
+    var gpa = heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     try doit(gpa.allocator());
 }
