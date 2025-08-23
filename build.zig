@@ -21,9 +21,11 @@ pub fn build(b: *std.Build) void {
     // Build minzign cli
     const exe = b.addExecutable(.{
         .name = "minizign",
-        .root_source_file = b.path("src/main.zig"),
-        .target = target,
-        .optimize = optimize,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/main.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
     });
 
     exe.root_module.addImport("minizign", minizign_module);

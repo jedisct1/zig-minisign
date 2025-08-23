@@ -84,11 +84,11 @@ pub fn parseParams(allocator: std.mem.Allocator, str: []const u8) ![]Param(Help)
 /// Takes a string and parses it into many Param(Help). Returned is a newly allocated slice
 /// containing all the parsed params. The caller is responsible for freeing the slice.
 pub fn parseParamsEx(allocator: std.mem.Allocator, str: []const u8, end: *usize) ![]Param(Help) {
-    var list = std.ArrayList(Param(Help)).init(allocator);
-    errdefer list.deinit();
+    var list = std.ArrayList(Param(Help)){};
+    errdefer list.deinit(allocator);
 
-    try parseParamsIntoArrayListEx(&list, str, end);
-    return try list.toOwnedSlice();
+    try parseParamsIntoArrayListEx(allocator, &list, str, end);
+    return try list.toOwnedSlice(allocator);
 }
 
 /// Takes a string and parses it into many Param(Help) at comptime. Returned is an array of
@@ -131,9 +131,7 @@ fn countParams(str: []const u8) usize {
 /// is returned, containing all the parameters parsed. This function will fail if the input slice
 /// is to small.
 pub fn parseParamsIntoSlice(slice: []Param(Help), str: []const u8) ![]Param(Help) {
-    var null_alloc = std.heap.FixedBufferAllocator.init("");
     var list = std.ArrayList(Param(Help)){
-        .allocator = null_alloc.allocator(),
         .items = slice[0..0],
         .capacity = slice.len,
     };
@@ -146,14 +144,13 @@ pub fn parseParamsIntoSlice(slice: []Param(Help), str: []const u8) ![]Param(Help
 /// is returned, containing all the parameters parsed. This function will fail if the input slice
 /// is to small.
 pub fn parseParamsIntoSliceEx(slice: []Param(Help), str: []const u8, end: *usize) ![]Param(Help) {
-    var null_alloc = std.heap.FixedBufferAllocator.init("");
+    var null_allocator = std.heap.FixedBufferAllocator.init("");
     var list = std.ArrayList(Param(Help)){
-        .allocator = null_alloc.allocator(),
         .items = slice[0..0],
         .capacity = slice.len,
     };
 
-    try parseParamsIntoArrayListEx(&list, str, end);
+    try parseParamsIntoArrayListEx(null_allocator.allocator(), &list, str, end);
     return list.items;
 }
 
@@ -164,13 +161,13 @@ pub fn parseParamsIntoArrayList(list: *std.ArrayList(Param(Help)), str: []const 
 }
 
 /// Takes a string and parses it into many Param(Help), which are appended onto `list`.
-pub fn parseParamsIntoArrayListEx(list: *std.ArrayList(Param(Help)), str: []const u8, end: *usize) !void {
+pub fn parseParamsIntoArrayListEx(allocator: std.mem.Allocator, list: *std.ArrayList(Param(Help)), str: []const u8, end: *usize) !void {
     var i: usize = 0;
     while (i != str.len) {
         var end_of_this: usize = undefined;
         errdefer end.* = i + end_of_this;
 
-        try list.append(try parseParamEx(str[i..], &end_of_this));
+        try list.append(allocator, try parseParamEx(str[i..], &end_of_this));
         i += end_of_this;
     }
 
@@ -542,7 +539,7 @@ pub const Diagnostic = struct {
 
     /// Default diagnostics reporter when all you want is English with no colors.
     /// Use this as a reference for implementing your own if needed.
-    pub fn report(diag: Diagnostic, stream: anytype, err: anyerror) !void {
+    pub fn report(diag: Diagnostic, stream: *std.Io.Writer, err: anyerror) !void {
         var longest = diag.name.longest();
         if (longest.kind == .positional)
             longest.name = diag.arg;
@@ -563,13 +560,21 @@ pub const Diagnostic = struct {
             else => try stream.print("Error while parsing arguments: {s}\n", .{@errorName(err)}),
         }
     }
+
+    /// Wrapper around `report`, which writes to a file in a buffered manner
+    pub fn reportToFile(diag: Diagnostic, file: std.fs.File, err: anyerror) !void {
+        var buf: [1024]u8 = undefined;
+        var writer = file.writer(&buf);
+        try diag.report(&writer.interface, err);
+        return writer.interface.flush();
+    }
 };
 
 fn testDiag(diag: Diagnostic, err: anyerror, expected: []const u8) !void {
     var buf: [1024]u8 = undefined;
-    var slice_stream = std.io.fixedBufferStream(&buf);
-    diag.report(slice_stream.writer(), err) catch unreachable;
-    try std.testing.expectEqualStrings(expected, slice_stream.getWritten());
+    var writer = std.Io.Writer.fixed(&buf);
+    try diag.report(&writer, err);
+    try std.testing.expectEqualStrings(expected, writer.buffered());
 }
 
 test "Diagnostic.report" {
@@ -795,7 +800,7 @@ pub fn parseEx(
             const i = positionals_index;
             positionals_index += 1;
 
-            if (stream.positional != arg.param)
+            if (arg.param.names.longest().kind != .positional)
                 // This is a trick to emulate a runtime `continue` in an `inline for`.
                 break :continue_params_loop;
 
@@ -809,15 +814,17 @@ pub fn parseEx(
             // positional parameters, the rest are stored in the last `positional` field.
             const pos = &positionals[i];
             const last = positionals.len == i + 1;
-            if ((last and positional_count >= i) or positional_count == i)
+            if ((last and positional_count >= i) or positional_count == i) {
                 switch (@typeInfo(@TypeOf(pos.*))) {
                     .optional => pos.* = try parser(arg.value.?),
                     else => try pos.append(allocator, try parser(arg.value.?)),
-                };
+                }
 
-            if (opt.terminating_positional <= positional_count)
-                break :arg_loop;
-            positional_count += 1;
+                if (opt.terminating_positional <= positional_count)
+                    break :arg_loop;
+                positional_count += 1;
+                continue :arg_loop;
+            }
         }
     }
 
@@ -1111,41 +1118,57 @@ test "single positional" {
 test "multiple positionals" {
     const params = comptime parseParamsComptime(
         \\<u8>
+        \\<u8>
         \\<str>
         \\
     );
 
-    // {
-    //     var iter = args.SliceIterator{ .args = &.{} };
-    //     var res = try parseEx(Help, &params, parsers.default, &iter, .{
-    //         .allocator = std.testing.allocator,
-    //     });
-    //     defer res.deinit();
+    {
+        var iter = args.SliceIterator{ .args = &.{} };
+        var res = try parseEx(Help, &params, parsers.default, &iter, .{
+            .allocator = std.testing.allocator,
+        });
+        defer res.deinit();
 
-    //     try std.testing.expect(res.positionals[0] == null);
-    //     try std.testing.expect(res.positionals[1] == null);
-    // }
-
-    // {
-    //     var iter = args.SliceIterator{ .args = &.{"1"} };
-    //     var res = try parseEx(Help, &params, parsers.default, &iter, .{
-    //         .allocator = std.testing.allocator,
-    //     });
-    //     defer res.deinit();
-
-    //     try std.testing.expectEqual(@as(u8, 1), res.positionals[0].?);
-    //     try std.testing.expect(res.positionals[1] == null);
-    // }
+        try std.testing.expect(res.positionals[0] == null);
+        try std.testing.expect(res.positionals[1] == null);
+        try std.testing.expect(res.positionals[2] == null);
+    }
 
     {
-        var iter = args.SliceIterator{ .args = &.{ "1", "b" } };
+        var iter = args.SliceIterator{ .args = &.{"1"} };
         var res = try parseEx(Help, &params, parsers.default, &iter, .{
             .allocator = std.testing.allocator,
         });
         defer res.deinit();
 
         try std.testing.expectEqual(@as(u8, 1), res.positionals[0].?);
-        try std.testing.expectEqualStrings("b", res.positionals[1].?);
+        try std.testing.expect(res.positionals[1] == null);
+        try std.testing.expect(res.positionals[2] == null);
+    }
+
+    {
+        var iter = args.SliceIterator{ .args = &.{ "1", "2" } };
+        var res = try parseEx(Help, &params, parsers.default, &iter, .{
+            .allocator = std.testing.allocator,
+        });
+        defer res.deinit();
+
+        try std.testing.expectEqual(@as(u8, 1), res.positionals[0].?);
+        try std.testing.expectEqual(@as(u8, 2), res.positionals[1].?);
+        try std.testing.expect(res.positionals[2] == null);
+    }
+
+    {
+        var iter = args.SliceIterator{ .args = &.{ "1", "2", "b" } };
+        var res = try parseEx(Help, &params, parsers.default, &iter, .{
+            .allocator = std.testing.allocator,
+        });
+        defer res.deinit();
+
+        try std.testing.expectEqual(@as(u8, 1), res.positionals[0].?);
+        try std.testing.expectEqual(@as(u8, 2), res.positionals[1].?);
+        try std.testing.expectEqualStrings("b", res.positionals[2].?);
     }
 }
 
@@ -1245,9 +1268,9 @@ fn testErr(
         .diagnostic = &diag,
     }) catch |err| {
         var buf: [1024]u8 = undefined;
-        var fbs = std.io.fixedBufferStream(&buf);
-        diag.report(fbs.writer(), err) catch return error.TestFailed;
-        try std.testing.expectEqualStrings(expected, fbs.getWritten());
+        var writer = std.Io.Writer.fixed(&buf);
+        try diag.report(&writer, err);
+        try std.testing.expectEqualStrings(expected, writer.buffered());
         return;
     };
 
@@ -1289,7 +1312,7 @@ pub const Help = struct {
 };
 
 pub const HelpOptions = struct {
-    /// Render the description of a parameter in a simular way to how markdown would render
+    /// Render the description of a parameter in a similar way to how markdown would render
     /// such a string. This means that single newlines won't be respected unless followed by
     /// bullet points or other markdown elements.
     markdown_lite: bool = true,
@@ -1341,6 +1364,19 @@ pub const HelpOptions = struct {
     spacing_between_parameters: usize = 1,
 };
 
+/// Wrapper around `help`, which writes to a file in a buffered manner
+pub fn helpToFile(
+    file: std.fs.File,
+    comptime Id: type,
+    params: []const Param(Id),
+    opt: HelpOptions,
+) !void {
+    var buf: [1024]u8 = undefined;
+    var writer = file.writer(&buf);
+    try help(&writer.interface, Id, params, opt);
+    return writer.interface.flush();
+}
+
 /// Print a slice of `Param` formatted as a help string to `writer`. This function expects
 /// `Id` to have the methods `description` and `value` which are used by `help` to describe
 /// each parameter. Using `Help` as `Id` is good choice.
@@ -1348,7 +1384,7 @@ pub const HelpOptions = struct {
 /// The output can be constumized with the `opt` parameter. For default formatting `.{}` can
 /// be passed.
 pub fn help(
-    writer: anytype,
+    writer: *std.Io.Writer,
     comptime Id: type,
     params: []const Param(Id),
     opt: HelpOptions,
@@ -1356,8 +1392,9 @@ pub fn help(
     const max_spacing = blk: {
         var res: usize = 0;
         for (params) |param| {
-            var cs = ccw.codepointCountingWriter(std.io.null_writer);
-            try printParam(cs.writer(), Id, param);
+            var discarding = std.Io.Writer.Discarding.init(&.{});
+            var cs = ccw.CodepointCountingWriter.init(&discarding.writer);
+            try printParam(&cs.interface, Id, param);
             if (res < cs.codepoints_written)
                 res = @intCast(cs.codepoints_written);
         }
@@ -1372,16 +1409,15 @@ pub fn help(
     var first_parameter: bool = true;
     for (params) |param| {
         if (!first_parameter)
-            try writer.writeByteNTimes('\n', opt.spacing_between_parameters);
+            try writer.splatByteAll('\n', opt.spacing_between_parameters);
 
         first_parameter = false;
-        try writer.writeByteNTimes(' ', opt.indent);
+        try writer.splatByteAll(' ', opt.indent);
 
-        var cw = ccw.codepointCountingWriter(writer);
-        try printParam(cw.writer(), Id, param);
+        var cw = ccw.CodepointCountingWriter.init(writer);
+        try printParam(&cw.interface, Id, param);
 
-        const Writer = DescriptionWriter(@TypeOf(writer));
-        var description_writer = Writer{
+        var description_writer = DescriptionWriter{
             .underlying_writer = writer,
             .indentation = description_indentation,
             .printed_chars = @intCast(cw.codepoints_written),
@@ -1480,57 +1516,53 @@ pub fn help(
     }
 }
 
-fn DescriptionWriter(comptime UnderlyingWriter: type) type {
-    return struct {
-        pub const WriteError = UnderlyingWriter.Error;
+const DescriptionWriter = struct {
+    underlying_writer: *std.Io.Writer,
 
-        underlying_writer: UnderlyingWriter,
+    indentation: usize,
+    max_width: usize,
+    printed_chars: usize,
 
-        indentation: usize,
-        max_width: usize,
-        printed_chars: usize,
+    pub fn writeWord(writer: *@This(), word: []const u8) !void {
+        std.debug.assert(word.len != 0);
 
-        pub fn writeWord(writer: *@This(), word: []const u8) !void {
-            std.debug.assert(word.len != 0);
-
-            var first_word = writer.printed_chars <= writer.indentation;
-            const chars_to_write = try std.unicode.utf8CountCodepoints(word) + @intFromBool(!first_word);
-            if (chars_to_write + writer.printed_chars > writer.max_width) {
-                // If the word does not fit on this line, then we insert a new line and print
-                // it on that line. The only exception to this is if this was the first word.
-                // If the first word does not fit on this line, then it will also not fit on the
-                // next one. In that case, all we can really do is just output the word.
-                if (!first_word)
-                    try writer.newline();
-
-                first_word = true;
-            }
-
+        var first_word = writer.printed_chars <= writer.indentation;
+        const chars_to_write = try std.unicode.utf8CountCodepoints(word) + @intFromBool(!first_word);
+        if (chars_to_write + writer.printed_chars > writer.max_width) {
+            // If the word does not fit on this line, then we insert a new line and print
+            // it on that line. The only exception to this is if this was the first word.
+            // If the first word does not fit on this line, then it will also not fit on the
+            // next one. In that case, all we can really do is just output the word.
             if (!first_word)
-                try writer.underlying_writer.writeAll(" ");
+                try writer.newline();
 
-            try writer.ensureIndented();
-            try writer.underlying_writer.writeAll(word);
-            writer.printed_chars += chars_to_write;
+            first_word = true;
         }
 
-        pub fn newline(writer: *@This()) !void {
-            try writer.underlying_writer.writeAll("\n");
-            writer.printed_chars = 0;
-        }
+        if (!first_word)
+            try writer.underlying_writer.writeAll(" ");
 
-        fn ensureIndented(writer: *@This()) !void {
-            if (writer.printed_chars < writer.indentation) {
-                const to_indent = writer.indentation - writer.printed_chars;
-                try writer.underlying_writer.writeByteNTimes(' ', to_indent);
-                writer.printed_chars += to_indent;
-            }
+        try writer.ensureIndented();
+        try writer.underlying_writer.writeAll(word);
+        writer.printed_chars += chars_to_write;
+    }
+
+    pub fn newline(writer: *@This()) !void {
+        try writer.underlying_writer.writeAll("\n");
+        writer.printed_chars = 0;
+    }
+
+    fn ensureIndented(writer: *@This()) !void {
+        if (writer.printed_chars < writer.indentation) {
+            const to_indent = writer.indentation - writer.printed_chars;
+            try writer.underlying_writer.splatByteAll(' ', to_indent);
+            writer.printed_chars += to_indent;
         }
-    };
-}
+    }
+};
 
 fn printParam(
-    stream: anytype,
+    stream: *std.Io.Writer,
     comptime Id: type,
     param: Param(Id),
 ) !void {
@@ -1565,9 +1597,9 @@ fn testHelp(opt: HelpOptions, str: []const u8) !void {
     defer std.testing.allocator.free(params);
 
     var buf: [2048]u8 = undefined;
-    var fbs = std.io.fixedBufferStream(&buf);
-    try help(fbs.writer(), Help, params, opt);
-    try std.testing.expectEqualStrings(str, fbs.getWritten());
+    var writer = std.Io.Writer.fixed(&buf);
+    try help(&writer, Help, params, opt);
+    try std.testing.expectEqualStrings(str, writer.buffered());
 }
 
 test "clap.help" {
@@ -1992,14 +2024,22 @@ test "clap.help" {
     );
 }
 
+/// Wrapper around `usage`, which writes to a file in a buffered manner
+pub fn usageToFile(file: std.fs.File, comptime Id: type, params: []const Param(Id)) !void {
+    var buf: [1024]u8 = undefined;
+    var writer = file.writer(&buf);
+    try usage(&writer.interface, Id, params);
+    return writer.interface.flush();
+}
+
 /// Will print a usage message in the following format:
 /// [-abc] [--longa] [-d <T>] [--longb <T>] <T>
 ///
 /// First all none value taking parameters, which have a short name are printed, then non
 /// positional parameters and finally the positional.
-pub fn usage(stream: anytype, comptime Id: type, params: []const Param(Id)) !void {
-    var cos = ccw.codepointCountingWriter(stream);
-    const cs = cos.writer();
+pub fn usage(stream: *std.Io.Writer, comptime Id: type, params: []const Param(Id)) !void {
+    var cos = ccw.CodepointCountingWriter.init(stream);
+    const cs = &cos.interface;
     for (params) |param| {
         const name = param.names.short orelse continue;
         if (param.takes_value != .none)
@@ -2042,7 +2082,7 @@ pub fn usage(stream: anytype, comptime Id: type, params: []const Param(Id)) !voi
                 try cs.writeAll("...");
         }
 
-        try cs.writeByte(']');
+        try cs.writeAll("]");
     }
 
     if (!has_positionals)
@@ -2065,9 +2105,9 @@ pub fn usage(stream: anytype, comptime Id: type, params: []const Param(Id)) !voi
 
 fn testUsage(expected: []const u8, params: []const Param(Help)) !void {
     var buf: [1024]u8 = undefined;
-    var fbs = std.io.fixedBufferStream(&buf);
-    try usage(fbs.writer(), Help, params);
-    try std.testing.expectEqualStrings(expected, fbs.getWritten());
+    var writer = std.Io.Writer.fixed(&buf);
+    try usage(&writer, Help, params);
+    try std.testing.expectEqualStrings(expected, writer.buffered());
 }
 
 test "usage" {

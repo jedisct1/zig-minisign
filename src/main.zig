@@ -6,7 +6,6 @@ const debug = std.debug;
 const fs = std.fs;
 const fmt = std.fmt;
 const heap = std.heap;
-const io = std.io;
 const math = std.math;
 const mem = std.mem;
 const process = std.process;
@@ -43,9 +42,12 @@ const params = clap.parseParamsComptime(
 );
 
 fn usage() noreturn {
-    var out = io.getStdErr().writer();
-    out.writeAll("Usage:\n") catch unreachable;
-    clap.help(out, clap.Help, &params, .{}) catch unreachable;
+    var buf: [1024]u8 = undefined;
+    var stderr_writer = std.fs.File.stderr().writer(&buf);
+    const stderr = &stderr_writer.interface;
+    stderr.writeAll("Usage:\n") catch unreachable;
+    clap.help(stderr, clap.Help, &params, .{}) catch unreachable;
+    stderr.flush() catch unreachable;
     process.exit(1);
 }
 
@@ -58,7 +60,11 @@ fn doit(gpa_allocator: mem.Allocator) !void {
         .allocator = gpa_allocator,
         .diagnostic = &diag,
     }) catch |err| {
-        diag.report(io.getStdErr().writer(), err) catch {};
+        var buf: [1024]u8 = undefined;
+        var stderr_writer = std.fs.File.stderr().writer(&buf);
+        const stderr = &stderr_writer.interface;
+        diag.report(stderr, err) catch {};
+        stderr.flush() catch {};
         process.exit(1);
     };
     defer res.deinit();
@@ -81,7 +87,7 @@ fn doit(gpa_allocator: mem.Allocator) !void {
 
     if (res.args.convert != 0) {
         const ssh_key = pks[0].getSshKey();
-        const fd = io.getStdOut();
+        const fd = std.fs.File.stdout();
         _ = try fd.write(&ssh_key);
         return;
     }
