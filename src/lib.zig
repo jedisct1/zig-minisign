@@ -65,7 +65,8 @@ pub const Signature = struct {
     pub fn fromFile(allocator: mem.Allocator, path: []const u8) !Signature {
         const fd = try fs.cwd().openFile(path, .{ .mode = .read_only });
         defer fd.close();
-        const sig_str = try fd.readToEndAlloc(allocator, 4096);
+        var file_reader = fd.reader(&.{});
+        const sig_str = try file_reader.interface.allocRemaining(allocator, .limited(4096));
         defer allocator.free(sig_str);
         return Signature.decode(allocator, sig_str);
     }
@@ -149,7 +150,8 @@ pub const PublicKey = struct {
     pub fn fromFile(allocator: mem.Allocator, pks: []PublicKey, path: []const u8) ![]PublicKey {
         const fd = try fs.cwd().openFile(path, .{ .mode = .read_only });
         defer fd.close();
-        const pk_str = try fd.readToEndAlloc(allocator, 4096);
+        var file_reader = fd.reader(&.{});
+        const pk_str = try file_reader.interface.allocRemaining(allocator, .limited(4096));
         defer allocator.free(pk_str);
         return PublicKey.decode(pks, pk_str);
     }
