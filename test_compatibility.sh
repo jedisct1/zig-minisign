@@ -13,20 +13,21 @@ TESTS_RUN=0
 TESTS_PASSED=0
 TESTS_FAILED=0
 
-# Paths
-MINISIGN="minisign"
-MINIZIGN="./zig-out/bin/minizign"
+# Paths (can be overridden by environment variables)
+MINISIGN="${MINISIGN:-minisign}"
+MINIZIGN="${MINIZIGN:-./zig-out/bin/minizign}"
 TEST_DIR="./tmp/compat_test"
 
 # Check binaries exist
-if [ ! -f "$MINISIGN" ]; then
-    echo -e "${RED}Error: minisign not found at $MINISIGN${NC}"
+if ! command -v "$MINISIGN" >/dev/null 2>&1; then
+    echo -e "${RED}Error: minisign not found${NC}"
+    echo "Install minisign or set MINISIGN environment variable"
     exit 1
 fi
 
-if [ ! -f "$MINIZIGN" ]; then
-    echo -e "${RED}Error: minizign not found at $MINIZIGN${NC}"
-    echo "Run 'zig build' first"
+if ! command -v "$MINIZIGN" >/dev/null 2>&1; then
+    echo -e "${RED}Error: minizign not found${NC}"
+    echo "Run 'zig build' first or set MINIZIGN environment variable"
     exit 1
 fi
 
