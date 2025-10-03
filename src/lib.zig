@@ -145,7 +145,7 @@ pub const PublicKey = struct {
         var lines_it = mem.tokenizeScalar(u8, lines, '\n');
         var i: usize = 0;
         while (lines_it.next()) |line| {
-            var pk = PublicKey{ .key_id = mem.zeroes([8]u8), .key = undefined };
+            var pk = PublicKey{ .key_id = @splat(0), .key = undefined };
 
             var it = mem.tokenizeScalar(u8, line, ' ');
             const header = it.next() orelse return error.InvalidEncoding;
@@ -199,7 +199,7 @@ pub const PublicKey = struct {
 
     pub fn verifier(self: *const PublicKey, sig: *const Signature) !Verifier {
         const key_id_len = self.key_id.len;
-        const null_key_id = mem.zeroes([key_id_len]u8);
+        const null_key_id: [key_id_len]u8 = @splat(0);
         if (!mem.eql(u8, &null_key_id, &self.key_id) and !mem.eql(u8, &sig.key_id, &self.key_id)) {
             return error.KeyIdMismatch;
         }
@@ -522,7 +522,7 @@ pub const SecretKey = struct {
             .signature_algorithm = sig_alg,
             .kdf_algorithm = "\x00\x00".*, // Unencrypted by default
             .checksum_algorithm = "B2".*,
-            .kdf_salt = mem.zeroes([32]u8),
+            .kdf_salt = @splat(0),
             .kdf_opslimit = 0,
             .kdf_memlimit = 0,
             .key_id = key_id,
