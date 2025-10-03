@@ -18,6 +18,7 @@ const Signature = lib.Signature;
 const SecretKey = lib.SecretKey;
 
 fn verify(allocator: mem.Allocator, pks: []const PublicKey, path: []const u8, sig: Signature, prehash: ?bool) !void {
+    var had_key_id_mismatch = false;
     var i: usize = pks.len;
     while (i > 0) {
         i -= 1;
@@ -25,9 +26,13 @@ fn verify(allocator: mem.Allocator, pks: []const PublicKey, path: []const u8, si
         defer fd.close();
         if (pks[i].verifyFile(allocator, fd, sig, prehash)) |_| {
             return;
-        } else |_| {}
+        } else |err| {
+            if (err == error.KeyIdMismatch) {
+                had_key_id_mismatch = true;
+            }
+        }
     }
-    return error.SignatureVerificationFailed;
+    return if (had_key_id_mismatch) error.KeyIdMismatch else error.SignatureVerificationFailed;
 }
 
 fn sign(allocator: mem.Allocator, sk_path: []const u8, input_path: []const u8, sig_path: []const u8, trusted_comment: []const u8, untrusted_comment: []const u8) !void {
@@ -331,10 +336,34 @@ fn doit(gpa_allocator: mem.Allocator) !void {
             var stdout_writer = fs.File.stdout().writer(&.{});
             try stdout_writer.interface.print("Signature and comment signature verified\nTrusted comment: {s}\n", .{sig.trusted_comment});
         }
-    } else |_| {
+    } else |err| {
         if (quiet == 0) {
             var stderr_writer = fs.File.stderr().writer(&.{});
-            stderr_writer.interface.writeAll("Signature verification failed\n") catch {};
+            const writer = &stderr_writer.interface;
+
+            if (err == error.KeyIdMismatch) {
+                writer.writeAll("Signature verification failed: key ID mismatch\n") catch {};
+
+                const sig_key_id = mem.readInt(u64, &sig.key_id, Endian.little);
+                writer.print("Signature key ID: {X:0>16}\n", .{sig_key_id}) catch {};
+
+                const null_key_id: [8]u8 = @splat(0);
+                const prefix = if (pks.len == 1) "Public key ID: " else "Public key IDs:\n  ";
+                writer.writeAll(prefix) catch {};
+
+                for (pks, 0..) |pk, i| {
+                    if (i > 0) writer.writeAll("\n  ") catch {};
+                    if (mem.eql(u8, &pk.key_id, &null_key_id)) {
+                        writer.writeAll("(not set)") catch {};
+                    } else {
+                        const pk_key_id = mem.readInt(u64, &pk.key_id, Endian.little);
+                        writer.print("{X:0>16}", .{pk_key_id}) catch {};
+                    }
+                }
+                writer.writeAll("\n") catch {};
+            } else {
+                writer.writeAll("Signature verification failed\n") catch {};
+            }
         }
         process.exit(1);
     }
