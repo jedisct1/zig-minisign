@@ -2,7 +2,7 @@
 
 A Zig implementation of [Minisign](https://jedisct1.github.io/minisign/).
 
-`minizign` was primarily designed to verify signatures, although signing is likely to be implemented next.
+`minizign` supports signature verification, signing, and key generation.
 
 ## Compilation
 
@@ -26,28 +26,56 @@ for a speed-optimized version.
 
 ```text
 Usage:
-    -h, --help                  Display this help and exit
-    -p, --publickey-path <PATH> Public key path to a file
-    -P, --publickey <STRING>    Public key, as a BASE64-encoded string
-    -l, --legacy                Accept legacy signatures
-    -m, --input <PATH>          Input file
-    -q, --quiet                 Quiet mode
-    -V, --verify                Verify
-    -C, --convert               Convert the given public key to SSH format
+    -h, --help                       Display this help and exit
+    -p, --publickey-path <PATH>      Public key path to a file
+    -P, --publickey <STRING>         Public key, as a BASE64-encoded string
+    -s, --secretkey-path <PATH>      Secret key path to a file
+    -l, --legacy                     Accept legacy signatures
+    -m, --input <PATH>               Input file
+    -o, --output <PATH>              Output file (signature)
+    -q, --quiet                      Quiet mode
+    -V, --verify                     Verify
+    -S, --sign                       Sign
+    -G, --generate                   Generate a new key pair
+    -C, --convert                    Convert the given public key to SSH format
+    -t, --trusted-comment <STRING>   Trusted comment
+    -c, --untrusted-comment <STRING> Untrusted comment
 ```
 
-## Example
+## Examples
 
-Verify `public-resolvers.md` using `public-resolvers.md.minisig` and the public key file `minisig.pub`:
+### Key Generation
+
+Generate a new key pair:
 
 ```sh
-minizign -p minisign.pub -Vm public-resolvers.md
+minizign -G -s minisign.key -p minisign.pub
+```
+
+This will prompt for a password to encrypt the secret key. Leave empty for an unencrypted key.
+
+### Signing
+
+Sign a file:
+
+```sh
+minizign -S -s minisign.key -m file.txt
+```
+
+This creates `file.txt.minisig`. You can specify a custom output path with `-o`.
+
+### Verification
+
+Verify `public-resolvers.md` using `public-resolvers.md.minisig` and the public key file `minisign.pub`:
+
+```sh
+minizign -V -p minisign.pub -m public-resolvers.md
 ```
 
 Verify `public-resolvers.md` by directly providing the public key on the command-line:
 
 ```sh
-minizign -P RWQf6LRCGA9i53mlYecO4IzT51TGPpvWucNSCh1CBM0QTaLn73Y7GFO3 -Vm public-resolvers.md
+minizign -V -P RWQf6LRCGA9i53mlYecO4IzT51TGPpvWucNSCh1CBM0QTaLn73Y7GFO3 -m public-resolvers.md
 ```
 
 ## SSH-encoded public keys
