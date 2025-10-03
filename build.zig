@@ -55,4 +55,45 @@ pub fn build(b: *std.Build) void {
     const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_lib_unit_tests.step);
+
+    // Build a webassembly module. Does not use the standard optimize and
+    // target options.
+    {
+        const target_wasm32 = b.resolveTargetQuery(.{
+            .cpu_arch = .wasm32,
+            .os_tag = .freestanding,
+        });
+
+        const wasm = b.addExecutable(.{
+            .name = "minizign",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/wasm.zig"),
+                .target = target_wasm32,
+                .optimize = .ReleaseSmall,
+            }),
+        });
+
+        wasm.root_module.addImport("minizign", minizign_module);
+
+        wasm.entry = .disabled;
+        wasm.export_memory = true;
+        wasm.root_module.export_symbol_names = &.{
+            "allocate",
+            "free",
+            "signatureDecode",
+            "signatureGetTrustedComment",
+            "signatureGetTrustedCommentLength",
+            "signatureDeinit",
+            "publicKeyDecodeFromBase64",
+            "publicKeyDecodeFromSsh",
+            "publicKeyDeinit",
+            "publicKeyVerifier",
+            "verifierUpdate",
+            "verifierVerify",
+            "verifierDeinit",
+        };
+
+        const installWasm = b.addInstallArtifact(wasm, .{});
+        b.getInstallStep().dependOn(&installWasm.step);
+    }
 }
