@@ -56,20 +56,14 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_lib_unit_tests.step);
 
-    // Build a webassembly module. Does not use the standard optimize and
-    // target options.
-    {
-        const target_wasm32 = b.resolveTargetQuery(.{
-            .cpu_arch = .wasm32,
-            .os_tag = .freestanding,
-        });
-
+    // Build a wasm32-freestanding module when the target is wasm32-freestanding
+    if (is_freestanding and resolved_target.cpu.arch == .wasm32) {
         const wasm = b.addExecutable(.{
             .name = "minizign",
             .root_module = b.createModule(.{
                 .root_source_file = b.path("src/wasm.zig"),
-                .target = target_wasm32,
-                .optimize = .ReleaseSmall,
+                .target = target,
+                .optimize = optimize,
             }),
         });
 
