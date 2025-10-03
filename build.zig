@@ -18,29 +18,36 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    // Build minzign cli
-    const exe = b.addExecutable(.{
-        .name = "minizign",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/main.zig"),
-            .target = target,
-            .optimize = optimize,
-        }),
-    });
+    const resolved_target = target.result;
+    const is_freestanding = resolved_target.os.tag == .freestanding;
 
-    exe.root_module.addImport("minizign", minizign_module);
+    // Skip building the CLI executable for freestanding targets (e.g., WASM)
+    // since it requires OS features like file I/O, stdin/stdout, and process control
+    if (!is_freestanding) {
+        // Build minzign cli
+        const exe = b.addExecutable(.{
+            .name = "minizign",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/main.zig"),
+                .target = target,
+                .optimize = optimize,
+            }),
+        });
 
-    b.installArtifact(exe);
+        exe.root_module.addImport("minizign", minizign_module);
 
-    const run_cmd = b.addRunArtifact(exe);
-    run_cmd.step.dependOn(b.getInstallStep());
+        b.installArtifact(exe);
 
-    if (b.args) |args| {
-        run_cmd.addArgs(args);
+        const run_cmd = b.addRunArtifact(exe);
+        run_cmd.step.dependOn(b.getInstallStep());
+
+        if (b.args) |args| {
+            run_cmd.addArgs(args);
+        }
+
+        const run_step = b.step("run", "Run the app");
+        run_step.dependOn(&run_cmd.step);
     }
-
-    const run_step = b.step("run", "Run the app");
-    run_step.dependOn(&run_cmd.step);
 
     const lib_unit_tests = b.addTest(.{
         .root_module = minizign_module,

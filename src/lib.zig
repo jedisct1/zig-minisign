@@ -419,7 +419,7 @@ pub const SecretKey = struct {
         var stream: [104]u8 = undefined;
         defer crypto.secureZero(u8, &stream);
 
-        const params = crypto.pwhash.scrypt.Params.fromLimits(self.kdf_opslimit, self.kdf_memlimit);
+        const params = crypto.pwhash.scrypt.Params.fromLimits(self.kdf_opslimit, @intCast(self.kdf_memlimit));
         try crypto.pwhash.scrypt.kdf(allocator, &stream, password, &self.kdf_salt, params);
 
         self.xorData(&stream);
@@ -541,7 +541,7 @@ pub const SecretKey = struct {
         var stream: [104]u8 = undefined;
         defer crypto.secureZero(u8, &stream);
 
-        const params = crypto.pwhash.scrypt.Params.fromLimits(self.kdf_opslimit, self.kdf_memlimit);
+        const params = crypto.pwhash.scrypt.Params.fromLimits(self.kdf_opslimit, @intCast(self.kdf_memlimit));
         try crypto.pwhash.scrypt.kdf(allocator, &stream, password, &self.kdf_salt, params);
 
         self.xorData(&stream);

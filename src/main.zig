@@ -80,10 +80,14 @@ fn generate(allocator: mem.Allocator, sk_path: []const u8, pk_path: []const u8, 
 fn getPassword(allocator: mem.Allocator) ![]u8 {
     const stdin = fs.File.stdin();
     const stderr = fs.File.stderr();
-    const is_terminal = std.posix.isatty(stdin.handle);
+
+    const builtin = @import("builtin");
+    const has_termios = builtin.os.tag != .wasi;
+
+    const is_terminal = if (has_termios) std.posix.isatty(stdin.handle) else false;
 
     var original: std.posix.termios = undefined;
-    if (is_terminal) {
+    if (has_termios and is_terminal) {
         original = try std.posix.tcgetattr(stdin.handle);
         var termios = original;
         termios.lflag.ECHO = false;
@@ -91,7 +95,7 @@ fn getPassword(allocator: mem.Allocator) ![]u8 {
         try std.posix.tcsetattr(stdin.handle, .FLUSH, termios);
         try stderr.writeAll("Password: ");
     }
-    defer if (is_terminal) {
+    defer if (has_termios and is_terminal) {
         stderr.writeAll("\n") catch {};
         std.posix.tcsetattr(stdin.handle, .FLUSH, original) catch {};
     };
@@ -130,6 +134,8 @@ fn usage() noreturn {
 }
 
 fn getDefaultSecretKeyPath(allocator: mem.Allocator) !?[]u8 {
+    const builtin = @import("builtin");
+
     // First check MINISIGN_CONFIG_DIR environment variable
     if (process.getEnvVarOwned(allocator, "MINISIGN_CONFIG_DIR")) |config_dir| {
         defer allocator.free(config_dir);
@@ -144,23 +150,27 @@ fn getDefaultSecretKeyPath(allocator: mem.Allocator) !?[]u8 {
         // Check if file exists, if not continue to next option
         fs.cwd().access(path, .{}) catch {
             allocator.free(path);
-            // File doesn't exist, try app data dir
-            if (fs.getAppDataDir(allocator, "minisign")) |app_dir| {
-                defer allocator.free(app_dir);
-                const app_path = try fmt.allocPrint(allocator, "{s}{c}minisign.key", .{ app_dir, fs.path.sep });
-                return app_path;
-            } else |_| {}
+            // File doesn't exist, try app data dir (not available on WASI)
+            if (builtin.os.tag != .wasi) {
+                if (fs.getAppDataDir(allocator, "minisign")) |app_dir| {
+                    defer allocator.free(app_dir);
+                    const app_path = try fmt.allocPrint(allocator, "{s}{c}minisign.key", .{ app_dir, fs.path.sep });
+                    return app_path;
+                } else |_| {}
+            }
             return null;
         };
         return path;
     } else |_| {}
 
-    // Try app data directory
-    if (fs.getAppDataDir(allocator, "minisign")) |app_dir| {
-        defer allocator.free(app_dir);
-        const path = try fmt.allocPrint(allocator, "{s}{c}minisign.key", .{ app_dir, fs.path.sep });
-        return path;
-    } else |_| {}
+    // Try app data directory (not available on WASI)
+    if (builtin.os.tag != .wasi) {
+        if (fs.getAppDataDir(allocator, "minisign")) |app_dir| {
+            defer allocator.free(app_dir);
+            const path = try fmt.allocPrint(allocator, "{s}{c}minisign.key", .{ app_dir, fs.path.sep });
+            return path;
+        } else |_| {}
+    }
 
     // No default available
     return null;
