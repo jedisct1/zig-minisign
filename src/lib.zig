@@ -4,7 +4,6 @@ const crypto = std.crypto;
 const fs = std.fs;
 const fmt = std.fmt;
 const heap = std.heap;
-const io = std.io;
 const math = std.math;
 const mem = std.mem;
 const os = std.os;
@@ -62,10 +61,10 @@ pub const Signature = struct {
         return sig;
     }
 
-    pub fn fromFile(allocator: mem.Allocator, path: []const u8) !Signature {
+    pub fn fromFile(allocator: mem.Allocator, path: []const u8, io: std.Io) !Signature {
         const fd = try fs.cwd().openFile(path, .{ .mode = .read_only });
         defer fd.close();
-        var file_reader = fd.reader(&.{});
+        var file_reader = fd.reader(io, &.{});
         const sig_str = try file_reader.interface.allocRemaining(allocator, .limited(4096));
         defer allocator.free(sig_str);
         return Signature.decode(allocator, sig_str);
@@ -188,10 +187,10 @@ pub const PublicKey = struct {
         return pks[0..1];
     }
 
-    pub fn fromFile(allocator: mem.Allocator, pks: []PublicKey, path: []const u8) ![]PublicKey {
+    pub fn fromFile(allocator: mem.Allocator, pks: []PublicKey, path: []const u8, io: std.Io) ![]PublicKey {
         const fd = try fs.cwd().openFile(path, .{ .mode = .read_only });
         defer fd.close();
-        var file_reader = fd.reader(&.{});
+        var file_reader = fd.reader(io, &.{});
         const pk_str = try file_reader.interface.allocRemaining(allocator, .limited(4096));
         defer allocator.free(pk_str);
         return PublicKey.decode(pks, pk_str);
@@ -390,10 +389,10 @@ pub const SecretKey = struct {
         return sk;
     }
 
-    pub fn fromFile(allocator: mem.Allocator, path: []const u8) !SecretKey {
+    pub fn fromFile(allocator: mem.Allocator, path: []const u8, io: std.Io) !SecretKey {
         const fd = try fs.cwd().openFile(path, .{ .mode = .read_only });
         defer fd.close();
-        var file_reader = fd.reader(&.{});
+        var file_reader = fd.reader(io, &.{});
         const sk_str = try file_reader.interface.allocRemaining(allocator, .limited(4096));
         defer allocator.free(sk_str);
         return SecretKey.decode(allocator, sk_str);

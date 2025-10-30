@@ -35,14 +35,14 @@ fn verify(allocator: mem.Allocator, pks: []const PublicKey, path: []const u8, si
     return if (had_key_id_mismatch) error.KeyIdMismatch else error.SignatureVerificationFailed;
 }
 
-fn sign(allocator: mem.Allocator, sk_path: []const u8, input_path: []const u8, sig_path: []const u8, trusted_comment: []const u8, untrusted_comment: []const u8) !void {
+fn sign(allocator: mem.Allocator, sk_path: []const u8, input_path: []const u8, sig_path: []const u8, trusted_comment: []const u8, untrusted_comment: []const u8, io: std.Io) !void {
     // Load secret key
-    var sk = try SecretKey.fromFile(allocator, sk_path);
+    var sk = try SecretKey.fromFile(allocator, sk_path, io);
     defer sk.deinit();
 
     // Get password if key is encrypted
     if (mem.eql(u8, &sk.kdf_algorithm, "Sc")) {
-        const password = try getPassword(allocator);
+        const password = try getPassword(allocator, io);
         defer allocator.free(password);
         try sk.decrypt(allocator, password);
     }
@@ -77,7 +77,7 @@ fn generate(allocator: mem.Allocator, sk_path: []const u8, pk_path: []const u8, 
     try pk.toFile(pk_path);
 }
 
-fn getPassword(allocator: mem.Allocator) ![]u8 {
+fn getPassword(allocator: mem.Allocator, io: std.Io) ![]u8 {
     const stdin = fs.File.stdin();
     const stderr = fs.File.stderr();
 
@@ -101,7 +101,7 @@ fn getPassword(allocator: mem.Allocator) ![]u8 {
     };
 
     var reader_buf: [1024]u8 = undefined;
-    var reader = stdin.reader(&reader_buf);
+    var reader = stdin.reader(io, &reader_buf);
     const line = try reader.interface.takeDelimiterExclusive('\n');
     return allocator.dupe(u8, mem.trim(u8, line, &std.ascii.whitespace));
 }
@@ -177,6 +177,9 @@ fn getDefaultSecretKeyPath(allocator: mem.Allocator) !?[]u8 {
 }
 
 fn doit(gpa_allocator: mem.Allocator) !void {
+    var threaded = std.Io.Threaded.init_single_threaded;
+    const io = threaded.ioBasic();
+
     var diag = clap.Diagnostic{};
     var res = clap.parse(clap.Help, &params, .{
         .PATH = clap.parsers.string,
@@ -247,7 +250,7 @@ fn doit(gpa_allocator: mem.Allocator) !void {
             try stderr.writeAll("Overwrite? (y/N): ");
 
             var response_buf: [10]u8 = undefined;
-            var reader = stdin.reader(&response_buf);
+            var reader = stdin.reader(io, &response_buf);
             const response = reader.interface.takeDelimiterExclusive('\n') catch "";
 
             const trimmed = mem.trim(u8, response, &std.ascii.whitespace);
@@ -268,7 +271,7 @@ fn doit(gpa_allocator: mem.Allocator) !void {
         // Prompt for password
         const stderr = fs.File.stderr();
         try stderr.writeAll("Enter password (leave empty for unencrypted key): ");
-        const password = try getPassword(arena.allocator());
+        const password = try getPassword(arena.allocator(), io);
         defer arena.allocator().free(password);
 
         const pwd = if (password.len > 0) password else null;
@@ -301,13 +304,14 @@ fn doit(gpa_allocator: mem.Allocator) !void {
         };
 
         const trusted_comment = if (@field(res.args, "trusted-comment")) |tc| tc else blk: {
-            const timestamp = std.time.timestamp();
+            const now = try std.Io.Clock.Timestamp.now(io, .real);
+            const timestamp = now.raw.toSeconds();
             break :blk try fmt.allocPrint(arena.allocator(), "timestamp:{d}", .{timestamp});
         };
 
         const untrusted_comment = if (@field(res.args, "untrusted-comment")) |uc| uc else "signature from minizign secret key";
 
-        try sign(arena.allocator(), sk_path.?, input_path.?, sig_path, trusted_comment, untrusted_comment);
+        try sign(arena.allocator(), sk_path.?, input_path.?, sig_path, trusted_comment, untrusted_comment, io);
 
         if (quiet == 0) {
             var stdout_writer = fs.File.stdout().writer(&.{});
@@ -324,7 +328,7 @@ fn doit(gpa_allocator: mem.Allocator) !void {
     const pks = if (pk_b64) |b64| blk: {
         pks_buf[0] = try PublicKey.decodeFromBase64(b64);
         break :blk pks_buf[0..1];
-    } else try PublicKey.fromFile(gpa_allocator, &pks_buf, pk_path.?);
+    } else try PublicKey.fromFile(gpa_allocator, &pks_buf, pk_path.?, io);
 
     if (res.args.convert != 0) {
         const ssh_key = pks[0].getSshKey();
@@ -340,7 +344,7 @@ fn doit(gpa_allocator: mem.Allocator) !void {
     var arena = heap.ArenaAllocator.init(gpa_allocator);
     defer arena.deinit();
     const sig_path = if (output_path) |path| path else try fmt.allocPrint(arena.allocator(), "{s}.minisig", .{input_path.?});
-    const sig = try Signature.fromFile(arena.allocator(), sig_path);
+    const sig = try Signature.fromFile(arena.allocator(), sig_path, io);
     if (verify(arena.allocator(), pks, input_path.?, sig, prehash)) {
         if (quiet == 0) {
             var stdout_writer = fs.File.stdout().writer(&.{});
