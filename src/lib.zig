@@ -39,16 +39,16 @@ pub const Signature = struct {
         errdefer arena.deinit();
         const allocator = arena.allocator();
         var it = mem.tokenizeScalar(u8, lines_str, '\n');
-        const untrusted_comment = try allocator.dupe(u8, it.next() orelse return error.InvalidEncoding);
+        const untrusted_comment = try allocator.dupe(u8, mem.trim(u8, it.next() orelse return error.InvalidEncoding, " \t\r\n"));
         var bin1: [74]u8 = undefined;
-        try base64.standard.Decoder.decode(&bin1, it.next() orelse return error.InvalidEncoding);
-        var trusted_comment = try allocator.dupe(u8, it.next() orelse return error.InvalidEncoding);
-        if (!mem.startsWith(u8, trusted_comment, "trusted comment: ")) {
+        try base64.standard.Decoder.decode(&bin1, mem.trim(u8, it.next() orelse return error.InvalidEncoding, " \t\r\n"));
+        const trusted_comment_line = mem.trim(u8, it.next() orelse return error.InvalidEncoding, " \t\r\n");
+        if (!mem.startsWith(u8, trusted_comment_line, "trusted comment: ")) {
             return error.InvalidEncoding;
         }
-        trusted_comment = trusted_comment["Trusted comment: ".len..];
+        const trusted_comment = try allocator.dupe(u8, trusted_comment_line["trusted comment: ".len..]);
         var bin2: [64]u8 = undefined;
-        try base64.standard.Decoder.decode(&bin2, it.next() orelse return error.InvalidEncoding);
+        try base64.standard.Decoder.decode(&bin2, mem.trim(u8, it.next() orelse return error.InvalidEncoding, " \t\r\n"));
         const sig = Signature{
             .arena = arena,
             .untrusted_comment = untrusted_comment,
@@ -182,7 +182,8 @@ pub const PublicKey = struct {
 
         var it = mem.tokenizeScalar(u8, lines_str, '\n');
         _ = it.next() orelse return error.InvalidEncoding;
-        const pk = try decodeFromBase64(it.next() orelse return error.InvalidEncoding);
+        const encoded_key = mem.trim(u8, it.next() orelse return error.InvalidEncoding, " \t\r\n");
+        const pk = try decodeFromBase64(encoded_key);
         pks[0] = pk;
         return pks[0..1];
     }
@@ -354,9 +355,9 @@ pub const SecretKey = struct {
         const allocator = arena.allocator();
 
         var it = mem.tokenizeScalar(u8, lines_str, '\n');
-        const untrusted_comment = try allocator.dupe(u8, it.next() orelse return error.InvalidEncoding);
+        const untrusted_comment = try allocator.dupe(u8, mem.trim(u8, it.next() orelse return error.InvalidEncoding, " \t\r\n"));
 
-        const encoded_key = it.next() orelse return error.InvalidEncoding;
+        const encoded_key = mem.trim(u8, it.next() orelse return error.InvalidEncoding, " \t\r\n");
 
         // The secret key structure is 158 bytes total:
         // 2 (sig_alg) + 2 (kdf_alg) + 2 (chk_alg) + 32 (salt) + 8 (opslimit) + 8 (memlimit) + 8 (keynum) + 64 (sk) + 32 (chk) = 158 bytes
