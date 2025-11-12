@@ -78,32 +78,94 @@ fn generate(allocator: mem.Allocator, sk_path: []const u8, pk_path: []const u8, 
 }
 
 fn getPassword(allocator: mem.Allocator, io: std.Io) ![]u8 {
-    const stdin = fs.File.stdin();
     const stderr = fs.File.stderr();
-
     const builtin = @import("builtin");
     const has_termios = builtin.os.tag != .wasi;
 
-    const is_terminal = if (has_termios) std.posix.isatty(stdin.handle) else false;
+    // On Unix, try to open /dev/tty for secure password reading
+    // This prevents buffered input from being echoed if the process is killed
+    var tty_file: ?fs.File = null;
+    var input_file: fs.File = undefined;
+
+    if (has_termios) {
+        // Try to open /dev/tty first (more secure)
+        tty_file = fs.openFileAbsolute("/dev/tty", .{ .mode = .read_write }) catch null;
+        input_file = tty_file orelse fs.File.stdin();
+    } else {
+        input_file = fs.File.stdin();
+    }
+    defer if (tty_file) |f| f.close();
+
+    const is_terminal = if (has_termios) std.posix.isatty(input_file.handle) else false;
 
     var original: std.posix.termios = undefined;
     if (has_termios and is_terminal) {
-        original = try std.posix.tcgetattr(stdin.handle);
-        var termios = original;
-        termios.lflag.ECHO = false;
-        termios.lflag.ECHONL = false;
-        try std.posix.tcsetattr(stdin.handle, .FLUSH, termios);
+        original = try std.posix.tcgetattr(input_file.handle);
+        var raw = original;
+
+        // Set raw mode to prevent any buffering
+        // Disable canonical mode (line buffering)
+        raw.lflag.ICANON = false;
+        // Disable all echo
+        raw.lflag.ECHO = false;
+        raw.lflag.ECHONL = false;
+        // Disable signal generation
+        raw.lflag.ISIG = false;
+        // Disable extended input processing
+        raw.lflag.IEXTEN = false;
+
+        // Disable input processing flags
+        raw.iflag.BRKINT = false;
+        raw.iflag.ICRNL = false;
+        raw.iflag.INPCK = false;
+        raw.iflag.ISTRIP = false;
+        raw.iflag.IXON = false;
+
+        // Set minimum characters to read and timeout
+        raw.cc[@intFromEnum(std.posix.V.MIN)] = 1; // Read at least 1 character
+        raw.cc[@intFromEnum(std.posix.V.TIME)] = 0; // No timeout
+
+        try std.posix.tcsetattr(input_file.handle, .FLUSH, raw);
         try stderr.writeAll("Password: ");
     }
     defer if (has_termios and is_terminal) {
         stderr.writeAll("\n") catch {};
-        std.posix.tcsetattr(stdin.handle, .FLUSH, original) catch {};
+        std.posix.tcsetattr(input_file.handle, .FLUSH, original) catch {};
     };
 
-    var reader_buf: [1024]u8 = undefined;
-    var reader = stdin.reader(io, &reader_buf);
-    const line = try reader.interface.takeDelimiterExclusive('\n');
-    return allocator.dupe(u8, mem.trim(u8, line, &std.ascii.whitespace));
+    // Read password character by character in raw mode
+    var password = std.ArrayList(u8){};
+    defer password.deinit(allocator);
+
+    if (has_termios and is_terminal) {
+        // Raw mode: read character by character
+        var buf: [1]u8 = undefined;
+        while (true) {
+            const n = try input_file.read(&buf);
+            if (n == 0) break; // EOF
+
+            const c = buf[0];
+            if (c == '\n' or c == '\r') {
+                break;
+            } else if (c == 127 or c == 8) { // Backspace or Delete
+                if (password.items.len > 0) {
+                    _ = password.pop();
+                }
+            } else if (c == 3) { // Ctrl+C
+                return error.Interrupted;
+            } else if (c >= 32) { // Printable ASCII (32-126) and all UTF-8 multibyte bytes (>= 128)
+                try password.append(allocator, c);
+            }
+        }
+    } else {
+        // Non-terminal: read line normally
+        var reader_buf: [1024]u8 = undefined;
+        var reader = input_file.reader(io, &reader_buf);
+        const line = try reader.interface.takeDelimiterExclusive('\n');
+        try password.appendSlice(allocator, line);
+    }
+
+    return password.toOwnedSlice(allocator);
 }
 
 const params = clap.parseParamsComptime(
