@@ -116,7 +116,7 @@ fn countParams(str: []const u8) usize {
     var res: usize = 0;
     var it = std.mem.splitScalar(u8, str, '\n');
     while (it.next()) |line| {
-        const trimmed = std.mem.trimLeft(u8, line, " \t");
+        const trimmed = std.mem.trimStart(u8, line, " \t");
         if (std.mem.startsWith(u8, trimmed, "-") or
             std.mem.startsWith(u8, trimmed, "<"))
         {
@@ -891,7 +891,7 @@ fn Positionals(
         fields_len += 1;
     }
 
-    var fields: [fields_len]std.builtin.Type.StructField = undefined;
+    var field_types: [fields_len]type = undefined;
     var i: usize = 0;
     for (params) |param| {
         const longest = param.names.longest();
@@ -908,22 +908,11 @@ fn Positionals(
             },
         };
 
-        fields[i] = .{
-            .name = std.fmt.comptimePrint("{}", .{i}),
-            .type = FieldT,
-            .default_value_ptr = null,
-            .is_comptime = false,
-            .alignment = @alignOf(FieldT),
-        };
+        field_types[i] = FieldT;
         i += 1;
     }
 
-    return @Type(.{ .@"struct" = .{
-        .layout = .auto,
-        .fields = &fields,
-        .decls = &.{},
-        .is_tuple = true,
-    } });
+    return @Tuple(&field_types);
 }
 
 fn initPositionals(
@@ -1008,7 +997,9 @@ fn Arguments(
         fields_len += 1;
     }
 
-    var fields: [fields_len]std.builtin.Type.StructField = undefined;
+    var field_names: [fields_len][]const u8 = undefined;
+    var field_types: [fields_len]type = undefined;
+    var field_attrs: [fields_len]std.builtin.Type.StructField.Attributes = undefined;
     var i: usize = 0;
     for (params) |param| {
         const longest = param.names.longest();
@@ -1026,22 +1017,23 @@ fn Arguments(
         };
 
         const name = longest.name[0..longest.name.len] ++ ""; // Adds null terminator
-        fields[i] = .{
-            .name = name,
-            .type = @TypeOf(default_value),
+        field_names[i] = name;
+        field_types[i] = @TypeOf(default_value);
+        field_attrs[i] = .{
+            .@"comptime" = false,
+            .@"align" = @alignOf(@TypeOf(default_value)),
             .default_value_ptr = @ptrCast(&default_value),
-            .is_comptime = false,
-            .alignment = @alignOf(@TypeOf(default_value)),
         };
         i += 1;
     }
 
-    return @Type(.{ .@"struct" = .{
-        .layout = .auto,
-        .fields = &fields,
-        .decls = &.{},
-        .is_tuple = false,
-    } });
+    return @Struct(
+        .auto,
+        null,
+        &field_names,
+        &field_types,
+        if (fields_len == 0) &@splat(.{}) else &field_attrs,
+    );
 }
 
 test "str and u64" {
@@ -1434,7 +1426,7 @@ pub fn help(
             var res: usize = std.math.maxInt(usize);
             var it = std.mem.tokenizeScalar(u8, description, '\n');
             while (it.next()) |line| : (first_line = false) {
-                const trimmed = std.mem.trimLeft(u8, line, " ");
+                const trimmed = std.mem.trimStart(u8, line, " ");
                 const indent = line.len - trimmed.len;
 
                 // If the first line has no indentation, then we ignore the indentation of the
@@ -1468,7 +1460,7 @@ pub fn help(
             else
                 raw_line[@min(min_description_indent, raw_line.len)..];
 
-            const line = std.mem.trimLeft(u8, indented_line, " ");
+            const line = std.mem.trimStart(u8, indented_line, " ");
             if (line.len == 0) {
                 non_emitted_newlines += 1;
                 continue;
