@@ -2,12 +2,14 @@ const clap = @import("clap.zig");
 const std = @import("std");
 const base64 = std.base64;
 const crypto = std.crypto;
-const fs = std.fs;
 const fmt = std.fmt;
 const heap = std.heap;
+const Io = std.Io;
 const math = std.math;
 const mem = std.mem;
 const process = std.process;
+const Dir = Io.Dir;
+const File = Io.File;
 const Blake2b512 = crypto.hash.blake2.Blake2b512;
 const Ed25519 = crypto.sign.Ed25519;
 const Endian = std.builtin.Endian;
@@ -17,14 +19,14 @@ const PublicKey = lib.PublicKey;
 const Signature = lib.Signature;
 const SecretKey = lib.SecretKey;
 
-fn verify(allocator: mem.Allocator, pks: []const PublicKey, path: []const u8, sig: Signature, prehash: ?bool) !void {
+fn verify(allocator: mem.Allocator, io: Io, pks: []const PublicKey, path: []const u8, sig: Signature, prehash: ?bool) !void {
     var had_key_id_mismatch = false;
     var i: usize = pks.len;
     while (i > 0) {
         i -= 1;
-        const fd = try fs.cwd().openFile(path, .{ .mode = .read_only });
-        defer fd.close();
-        if (pks[i].verifyFile(allocator, fd, sig, prehash)) |_| {
+        const fd = try Dir.cwd().openFile(io, path, .{});
+        defer fd.close(io);
+        if (pks[i].verifyFile(allocator, io, fd, sig, prehash)) |_| {
             return;
         } else |err| {
             if (err == error.KeyIdMismatch) {
@@ -35,7 +37,7 @@ fn verify(allocator: mem.Allocator, pks: []const PublicKey, path: []const u8, si
     return if (had_key_id_mismatch) error.KeyIdMismatch else error.SignatureVerificationFailed;
 }
 
-fn sign(allocator: mem.Allocator, sk_path: []const u8, input_path: []const u8, sig_path: []const u8, trusted_comment: []const u8, untrusted_comment: []const u8, io: std.Io) !void {
+fn sign(allocator: mem.Allocator, sk_path: []const u8, input_path: []const u8, sig_path: []const u8, trusted_comment: []const u8, untrusted_comment: []const u8, io: Io) !void {
     // Load secret key
     var sk = try SecretKey.fromFile(allocator, sk_path, io);
     defer sk.deinit();
@@ -48,18 +50,18 @@ fn sign(allocator: mem.Allocator, sk_path: []const u8, input_path: []const u8, s
     }
 
     // Open input file
-    const fd = try fs.cwd().openFile(input_path, .{ .mode = .read_only });
-    defer fd.close();
+    const fd = try Dir.cwd().openFile(io, input_path, .{});
+    defer fd.close(io);
 
     // Sign the file (prehash mode by default)
-    var signature = try sk.signFile(allocator, fd, true, trusted_comment);
+    var signature = try sk.signFile(allocator, io, fd, true, trusted_comment);
     defer signature.deinit();
 
     // Write signature to file
-    try signature.toFile(sig_path, untrusted_comment);
+    try signature.toFile(io, sig_path, untrusted_comment);
 }
 
-fn generate(allocator: mem.Allocator, sk_path: []const u8, pk_path: []const u8, password: ?[]const u8) !void {
+fn generate(allocator: mem.Allocator, io: Io, sk_path: []const u8, pk_path: []const u8, password: ?[]const u8) !void {
     // Generate new keypair
     var sk = try SecretKey.generate(allocator);
     defer sk.deinit();
@@ -73,30 +75,30 @@ fn generate(allocator: mem.Allocator, sk_path: []const u8, pk_path: []const u8, 
     }
 
     // Save secret key and public key
-    try sk.toFile(sk_path);
-    try pk.toFile(pk_path);
+    try sk.toFile(io, sk_path);
+    try pk.toFile(io, pk_path);
 }
 
-fn getPassword(allocator: mem.Allocator, io: std.Io) ![]u8 {
-    const stderr = fs.File.stderr();
+fn getPassword(allocator: mem.Allocator, io: Io) ![]u8 {
+    const stderr = File.stderr();
     const builtin = @import("builtin");
     const has_termios = builtin.os.tag != .wasi;
 
     // On Unix, try to open /dev/tty for secure password reading
     // This prevents buffered input from being echoed if the process is killed
-    var tty_file: ?fs.File = null;
-    var input_file: fs.File = undefined;
+    var tty_file: ?File = null;
+    var input_file: File = undefined;
 
     if (has_termios) {
         // Try to open /dev/tty first (more secure)
-        tty_file = fs.openFileAbsolute("/dev/tty", .{ .mode = .read_write }) catch null;
-        input_file = tty_file orelse fs.File.stdin();
+        tty_file = Dir.openFileAbsolute(io, "/dev/tty", .{ .mode = .read_write }) catch null;
+        input_file = tty_file orelse File.stdin();
     } else {
-        input_file = fs.File.stdin();
+        input_file = File.stdin();
     }
-    defer if (tty_file) |f| f.close();
+    defer if (tty_file) |f| f.close(io);
 
-    const is_terminal = if (has_termios) std.posix.isatty(input_file.handle) else false;
+    const is_terminal = if (has_termios) (input_file.isTty(io) catch false) else false;
 
     var original: std.posix.termios = undefined;
     if (has_termios and is_terminal) {
@@ -126,10 +128,10 @@ fn getPassword(allocator: mem.Allocator, io: std.Io) ![]u8 {
         raw.cc[@intFromEnum(std.posix.V.TIME)] = 0; // No timeout
 
         try std.posix.tcsetattr(input_file.handle, .FLUSH, raw);
-        try stderr.writeAll("Password: ");
+        try stderr.writeStreamingAll(io, "Password: ");
     }
     defer if (has_termios and is_terminal) {
-        stderr.writeAll("\n") catch {};
+        stderr.writeStreamingAll(io, "\n") catch {};
         std.posix.tcsetattr(input_file.handle, .FLUSH, original) catch {};
     };
 
@@ -141,7 +143,7 @@ fn getPassword(allocator: mem.Allocator, io: std.Io) ![]u8 {
         // Raw mode: read character by character
         var buf: [1]u8 = undefined;
         while (true) {
-            const n = try input_file.read(&buf);
+            const n = try input_file.readStreaming(io, &.{&buf});
             if (n == 0) break; // EOF
 
             const c = buf[0];
@@ -185,9 +187,9 @@ const params = clap.parseParamsComptime(
     \\ -c, --untrusted-comment <STRING> Untrusted comment
 );
 
-fn usage() noreturn {
+fn usage(io: Io) noreturn {
     var buf: [1024]u8 = undefined;
-    var stderr_writer = std.fs.File.stderr().writer(&buf);
+    var stderr_writer = File.stderr().writer(io, &buf);
     const stderr = &stderr_writer.interface;
     stderr.writeAll("Usage:\n") catch unreachable;
     clap.help(stderr, clap.Help, &params, .{}) catch unreachable;
@@ -195,28 +197,28 @@ fn usage() noreturn {
     process.exit(1);
 }
 
-fn getDefaultSecretKeyPath(allocator: mem.Allocator) !?[]u8 {
+fn getDefaultSecretKeyPath(allocator: mem.Allocator, io: Io) !?[]u8 {
     const builtin = @import("builtin");
 
     // First check MINISIGN_CONFIG_DIR environment variable
     if (process.getEnvVarOwned(allocator, "MINISIGN_CONFIG_DIR")) |config_dir| {
         defer allocator.free(config_dir);
-        const path = try fmt.allocPrint(allocator, "{s}{c}minisign.key", .{ config_dir, fs.path.sep });
+        const path = try fmt.allocPrint(allocator, "{s}{c}minisign.key", .{ config_dir, Dir.path.sep });
         return path;
     } else |_| {}
 
     // Try $HOME/.minisign/minisign.key
     if (process.getEnvVarOwned(allocator, "HOME")) |home| {
         defer allocator.free(home);
-        const path = try fmt.allocPrint(allocator, "{s}{c}.minisign{c}minisign.key", .{ home, fs.path.sep, fs.path.sep });
+        const path = try fmt.allocPrint(allocator, "{s}{c}.minisign{c}minisign.key", .{ home, Dir.path.sep, Dir.path.sep });
         // Check if file exists, if not continue to next option
-        fs.cwd().access(path, .{}) catch {
+        Dir.cwd().access(io, path, .{}) catch {
             allocator.free(path);
             // File doesn't exist, try app data dir (not available on WASI)
             if (builtin.os.tag != .wasi) {
-                if (fs.getAppDataDir(allocator, "minisign")) |app_dir| {
+                if (std.fs.getAppDataDir(allocator, "minisign")) |app_dir| {
                     defer allocator.free(app_dir);
-                    const app_path = try fmt.allocPrint(allocator, "{s}{c}minisign.key", .{ app_dir, fs.path.sep });
+                    const app_path = try fmt.allocPrint(allocator, "{s}{c}minisign.key", .{ app_dir, Dir.path.sep });
                     return app_path;
                 } else |_| {}
             }
@@ -227,9 +229,9 @@ fn getDefaultSecretKeyPath(allocator: mem.Allocator) !?[]u8 {
 
     // Try app data directory (not available on WASI)
     if (builtin.os.tag != .wasi) {
-        if (fs.getAppDataDir(allocator, "minisign")) |app_dir| {
+        if (std.fs.getAppDataDir(allocator, "minisign")) |app_dir| {
             defer allocator.free(app_dir);
-            const path = try fmt.allocPrint(allocator, "{s}{c}minisign.key", .{ app_dir, fs.path.sep });
+            const path = try fmt.allocPrint(allocator, "{s}{c}minisign.key", .{ app_dir, Dir.path.sep });
             return path;
         } else |_| {}
     }
@@ -251,7 +253,7 @@ fn doit(gpa_allocator: mem.Allocator) !void {
         .diagnostic = &diag,
     }) catch |err| {
         var buf: [1024]u8 = undefined;
-        var stderr_writer = std.fs.File.stderr().writer(&buf);
+        var stderr_writer = File.stderr().writer(io, &buf);
         const stderr = &stderr_writer.interface;
         diag.report(stderr, err) catch {};
         stderr.flush() catch {};
@@ -259,7 +261,7 @@ fn doit(gpa_allocator: mem.Allocator) !void {
     };
     defer res.deinit();
 
-    if (res.args.help != 0) usage();
+    if (res.args.help != 0) usage(io);
     const quiet = res.args.quiet;
     const prehash: ?bool = if (res.args.legacy != 0) null else true;
     const pk_b64 = res.args.publickey;
@@ -271,16 +273,16 @@ fn doit(gpa_allocator: mem.Allocator) !void {
     const generate_mode = res.args.generate != 0;
 
     // Determine secret key path (from arg or default)
-    const default_sk_path = try getDefaultSecretKeyPath(gpa_allocator);
+    const default_sk_path = try getDefaultSecretKeyPath(gpa_allocator, io);
     defer if (default_sk_path) |path| gpa_allocator.free(path);
     const sk_path = sk_path_arg orelse default_sk_path;
 
     // Handle key generation mode
     if (generate_mode) {
         if (sk_path == null) {
-            var stderr_writer = fs.File.stderr().writer(&.{});
+            var stderr_writer = File.stderr().writer(io, &.{});
             stderr_writer.interface.writeAll("Error: Secret key path (-s) is required for key generation\n") catch {};
-            usage();
+            usage(io);
         }
 
         var arena = heap.ArenaAllocator.init(gpa_allocator);
@@ -290,13 +292,13 @@ fn doit(gpa_allocator: mem.Allocator) !void {
             break :blk try fmt.allocPrint(arena.allocator(), "{s}.pub", .{sk_path.?});
         };
 
-        const sk_exists = if (fs.cwd().access(sk_path.?, .{})) true else |_| false;
-        const pk_exists = if (fs.cwd().access(public_key_path, .{})) true else |_| false;
+        const sk_exists = if (Dir.cwd().access(io, sk_path.?, .{})) true else |_| false;
+        const pk_exists = if (Dir.cwd().access(io, public_key_path, .{})) true else |_| false;
 
         if (sk_exists or pk_exists) {
-            const stderr = fs.File.stderr();
-            const stdin = fs.File.stdin();
-            var stderr_writer = stderr.writer(&.{});
+            const stderr = File.stderr();
+            const stdin = File.stdin();
+            var stderr_writer = stderr.writer(io, &.{});
             const writer = &stderr_writer.interface;
 
             if (sk_exists and pk_exists) {
@@ -309,7 +311,7 @@ fn doit(gpa_allocator: mem.Allocator) !void {
                 try writer.print("Warning: Public key file already exists: {s}\n", .{public_key_path});
             }
 
-            try stderr.writeAll("Overwrite? (y/N): ");
+            try stderr.writeStreamingAll(io, "Overwrite? (y/N): ");
 
             var response_buf: [10]u8 = undefined;
             var reader = stdin.reader(io, &response_buf);
@@ -323,25 +325,25 @@ fn doit(gpa_allocator: mem.Allocator) !void {
 
             // Delete existing files if user confirmed
             if (sk_exists) {
-                try fs.cwd().deleteFile(sk_path.?);
+                try Dir.cwd().deleteFile(io, sk_path.?);
             }
             if (pk_exists) {
-                try fs.cwd().deleteFile(public_key_path);
+                try Dir.cwd().deleteFile(io, public_key_path);
             }
         }
 
         // Prompt for password
-        const stderr = fs.File.stderr();
-        try stderr.writeAll("Enter password (leave empty for unencrypted key): ");
+        const stderr = File.stderr();
+        try stderr.writeStreamingAll(io, "Enter password (leave empty for unencrypted key): ");
         const password = try getPassword(arena.allocator(), io);
         defer arena.allocator().free(password);
 
         const pwd = if (password.len > 0) password else null;
 
-        try generate(arena.allocator(), sk_path.?, public_key_path, pwd);
+        try generate(arena.allocator(), io, sk_path.?, public_key_path, pwd);
 
         if (quiet == 0) {
-            var stdout_writer = fs.File.stdout().writer(&.{});
+            var stdout_writer = File.stdout().writer(io, &.{});
             const writer = &stdout_writer.interface;
             try writer.print("Secret key written to {s}\n", .{sk_path.?});
             try writer.print("Public key written to {s}\n", .{public_key_path});
@@ -351,11 +353,11 @@ fn doit(gpa_allocator: mem.Allocator) !void {
 
     // Handle signing mode
     if (sign_mode) {
-        if (input_path == null) usage();
+        if (input_path == null) usage(io);
         if (sk_path == null) {
-            var stderr_writer = fs.File.stderr().writer(&.{});
+            var stderr_writer = File.stderr().writer(io, &.{});
             stderr_writer.interface.writeAll("Error: Secret key path is required for signing\n") catch {};
-            usage();
+            usage(io);
         }
 
         var arena = heap.ArenaAllocator.init(gpa_allocator);
@@ -366,7 +368,7 @@ fn doit(gpa_allocator: mem.Allocator) !void {
         };
 
         const trusted_comment = if (@field(res.args, "trusted-comment")) |tc| tc else blk: {
-            const now = try std.Io.Clock.Timestamp.now(io, .real);
+            const now = try Io.Clock.Timestamp.now(io, .real);
             const timestamp = now.raw.toSeconds();
             break :blk try fmt.allocPrint(arena.allocator(), "timestamp:{d}", .{timestamp});
         };
@@ -376,7 +378,7 @@ fn doit(gpa_allocator: mem.Allocator) !void {
         try sign(arena.allocator(), sk_path.?, input_path.?, sig_path, trusted_comment, untrusted_comment, io);
 
         if (quiet == 0) {
-            var stdout_writer = fs.File.stdout().writer(&.{});
+            var stdout_writer = File.stdout().writer(io, &.{});
             try stdout_writer.interface.print("Signature written to {s}\n", .{sig_path});
         }
         return;
@@ -384,7 +386,7 @@ fn doit(gpa_allocator: mem.Allocator) !void {
 
     // Handle conversion mode
     if (pk_path == null and pk_b64 == null) {
-        usage();
+        usage(io);
     }
     var pks_buf: [64]PublicKey = undefined;
     const pks = if (pk_b64) |b64| blk: {
@@ -394,27 +396,27 @@ fn doit(gpa_allocator: mem.Allocator) !void {
 
     if (res.args.convert != 0) {
         const ssh_key = pks[0].getSshKey();
-        const fd = std.fs.File.stdout();
-        _ = try fd.write(&ssh_key);
+        const fd = File.stdout();
+        try fd.writeStreamingAll(io, &ssh_key);
         return;
     }
 
     // Handle verification mode
     if (input_path == null) {
-        usage();
+        usage(io);
     }
     var arena = heap.ArenaAllocator.init(gpa_allocator);
     defer arena.deinit();
     const sig_path = if (output_path) |path| path else try fmt.allocPrint(arena.allocator(), "{s}.minisig", .{input_path.?});
     const sig = try Signature.fromFile(arena.allocator(), sig_path, io);
-    if (verify(arena.allocator(), pks, input_path.?, sig, prehash)) {
+    if (verify(arena.allocator(), io, pks, input_path.?, sig, prehash)) {
         if (quiet == 0) {
-            var stdout_writer = fs.File.stdout().writer(&.{});
+            var stdout_writer = File.stdout().writer(io, &.{});
             try stdout_writer.interface.print("Signature and comment signature verified\nTrusted comment: {s}\n", .{sig.trusted_comment});
         }
     } else |err| {
         if (quiet == 0) {
-            var stderr_writer = fs.File.stderr().writer(&.{});
+            var stderr_writer = File.stderr().writer(io, &.{});
             const writer = &stderr_writer.interface;
 
             if (err == error.KeyIdMismatch) {

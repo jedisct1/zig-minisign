@@ -1,13 +1,15 @@
 const std = @import("std");
 const base64 = std.base64;
 const crypto = std.crypto;
-const fs = std.fs;
 const fmt = std.fmt;
 const heap = std.heap;
+const Io = std.Io;
 const math = std.math;
 const mem = std.mem;
 const os = std.os;
 const process = std.process;
+const Dir = Io.Dir;
+const File = Io.File;
 const Blake2b256 = crypto.hash.blake2.Blake2b256;
 const Blake2b512 = crypto.hash.blake2.Blake2b512;
 const Ed25519 = crypto.sign.Ed25519;
@@ -61,21 +63,21 @@ pub const Signature = struct {
         return sig;
     }
 
-    pub fn fromFile(allocator: mem.Allocator, path: []const u8, io: std.Io) !Signature {
-        const fd = try fs.cwd().openFile(path, .{ .mode = .read_only });
-        defer fd.close();
+    pub fn fromFile(allocator: mem.Allocator, path: []const u8, io: Io) !Signature {
+        const fd = try Dir.cwd().openFile(io, path, .{});
+        defer fd.close(io);
         var file_reader = fd.reader(io, &.{});
         const sig_str = try file_reader.interface.allocRemaining(allocator, .limited(4096));
         defer allocator.free(sig_str);
         return Signature.decode(allocator, sig_str);
     }
 
-    pub fn toFile(self: *const Signature, path: []const u8, untrusted_comment: []const u8) !void {
-        const fd = try fs.cwd().createFile(path, .{ .exclusive = false });
-        defer fd.close();
+    pub fn toFile(self: *const Signature, io: Io, path: []const u8, untrusted_comment: []const u8) !void {
+        const fd = try Dir.cwd().createFile(io, path, .{});
+        defer fd.close(io);
 
         var buf: [4096]u8 = undefined;
-        var file_writer = fd.writer(&buf);
+        var file_writer = fd.writer(io, &buf);
         const writer = &file_writer.interface;
 
         // Write untrusted comment
@@ -188,9 +190,9 @@ pub const PublicKey = struct {
         return pks[0..1];
     }
 
-    pub fn fromFile(allocator: mem.Allocator, pks: []PublicKey, path: []const u8, io: std.Io) ![]PublicKey {
-        const fd = try fs.cwd().openFile(path, .{ .mode = .read_only });
-        defer fd.close();
+    pub fn fromFile(allocator: mem.Allocator, pks: []PublicKey, path: []const u8, io: Io) ![]PublicKey {
+        const fd = try Dir.cwd().openFile(io, path, .{});
+        defer fd.close(io);
         var file_reader = fd.reader(io, &.{});
         const pk_str = try file_reader.interface.allocRemaining(allocator, .limited(4096));
         defer allocator.free(pk_str);
@@ -216,7 +218,7 @@ pub const PublicKey = struct {
         };
     }
 
-    pub fn verifyFile(self: PublicKey, allocator: std.mem.Allocator, fd: fs.File, sig: Signature, prehash: ?bool) !void {
+    pub fn verifyFile(self: PublicKey, allocator: std.mem.Allocator, io: Io, fd: File, sig: Signature, prehash: ?bool) !void {
         var v = try self.verifier(&sig);
 
         if (prehash) |want_prehashed| {
@@ -227,7 +229,7 @@ pub const PublicKey = struct {
 
         var buf: [heap.page_size_max]u8 = undefined;
         while (true) {
-            const read_nb = try fd.read(&buf);
+            const read_nb = try fd.readStreaming(io, &.{&buf});
             if (read_nb == 0) {
                 break;
             }
@@ -263,12 +265,12 @@ pub const PublicKey = struct {
         _ = fmt.bufPrint(buffer, "{s} {s} {s}{X}\n", .{ key_type, encoded_ssh_key, key_id_prefix, mem.readInt(u64, &pk.key_id, Endian.little) }) catch unreachable;
     }
 
-    pub fn toFile(self: PublicKey, path: []const u8) !void {
-        const fd = try fs.cwd().createFile(path, .{ .exclusive = true });
-        defer fd.close();
+    pub fn toFile(self: PublicKey, io: Io, path: []const u8) !void {
+        const fd = try Dir.cwd().createFile(io, path, .{ .exclusive = true });
+        defer fd.close(io);
 
         var buf: [256]u8 = undefined;
-        var file_writer = fd.writer(&buf);
+        var file_writer = fd.writer(io, &buf);
         const writer = &file_writer.interface;
 
         // Write untrusted comment
@@ -390,9 +392,9 @@ pub const SecretKey = struct {
         return sk;
     }
 
-    pub fn fromFile(allocator: mem.Allocator, path: []const u8, io: std.Io) !SecretKey {
-        const fd = try fs.cwd().openFile(path, .{ .mode = .read_only });
-        defer fd.close();
+    pub fn fromFile(allocator: mem.Allocator, path: []const u8, io: Io) !SecretKey {
+        const fd = try Dir.cwd().openFile(io, path, .{});
+        defer fd.close(io);
         var file_reader = fd.reader(io, &.{});
         const sk_str = try file_reader.interface.allocRemaining(allocator, .limited(4096));
         defer allocator.free(sk_str);
@@ -441,7 +443,8 @@ pub const SecretKey = struct {
     pub fn signFile(
         self: *const SecretKey,
         allocator: mem.Allocator,
-        fd: fs.File,
+        io: Io,
+        fd: File,
         prehash: bool,
         trusted_comment: []const u8,
     ) !Signature {
@@ -451,7 +454,7 @@ pub const SecretKey = struct {
         var hasher = Blake2b512.init(.{});
         var buf: [heap.page_size_max]u8 = undefined;
         while (true) {
-            const read_nb = try fd.read(&buf);
+            const read_nb = try fd.readStreaming(io, &.{&buf});
             if (read_nb == 0) break;
             hasher.update(buf[0..read_nb]);
         }
@@ -548,12 +551,12 @@ pub const SecretKey = struct {
         self.kdf_algorithm = "Sc".*;
     }
 
-    pub fn toFile(self: *const SecretKey, path: []const u8) !void {
-        const fd = try fs.cwd().createFile(path, .{ .exclusive = true, .mode = 0o600 });
-        defer fd.close();
+    pub fn toFile(self: *const SecretKey, io: Io, path: []const u8) !void {
+        const fd = try Dir.cwd().createFile(io, path, .{ .exclusive = true, .permissions = File.Permissions.fromMode(0o600) });
+        defer fd.close(io);
 
         var buf: [4096]u8 = undefined;
-        var file_writer = fd.writer(&buf);
+        var file_writer = fd.writer(io, &buf);
         const writer = &file_writer.interface;
 
         // Write untrusted comment
