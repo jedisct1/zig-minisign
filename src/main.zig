@@ -37,30 +37,6 @@ fn verify(allocator: mem.Allocator, io: Io, pks: []const PublicKey, path: []cons
     return if (had_key_id_mismatch) error.KeyIdMismatch else error.SignatureVerificationFailed;
 }
 
-fn sign(allocator: mem.Allocator, sk_path: []const u8, input_path: []const u8, sig_path: []const u8, trusted_comment: []const u8, untrusted_comment: []const u8, io: Io) !void {
-    // Load secret key
-    var sk = try SecretKey.fromFile(allocator, sk_path, io);
-    defer sk.deinit();
-
-    // Get password if key is encrypted
-    if (mem.eql(u8, &sk.kdf_algorithm, "Sc")) {
-        const password = try getPassword(allocator, io);
-        defer allocator.free(password);
-        try sk.decrypt(allocator, password);
-    }
-
-    // Open input file
-    const fd = try Dir.cwd().openFile(io, input_path, .{});
-    defer fd.close(io);
-
-    // Sign the file (prehash mode by default)
-    var signature = try sk.signFile(allocator, io, fd, true, trusted_comment);
-    defer signature.deinit();
-
-    // Write signature to file
-    try signature.toFile(io, sig_path, untrusted_comment);
-}
-
 fn generate(allocator: mem.Allocator, io: Io, sk_path: []const u8, pk_path: []const u8, password: ?[]const u8) !void {
     // Generate new keypair
     var sk = try SecretKey.generate(allocator);
@@ -79,7 +55,35 @@ fn generate(allocator: mem.Allocator, io: Io, sk_path: []const u8, pk_path: []co
     try pk.toFile(io, pk_path);
 }
 
-fn getPassword(allocator: mem.Allocator, io: Io) ![]u8 {
+fn changePassword(allocator: mem.Allocator, io: Io, sk_path: []const u8) !void {
+    var sk = try SecretKey.fromFile(allocator, sk_path, io);
+    defer sk.deinit();
+
+    if (mem.eql(u8, &sk.kdf_algorithm, "Sc")) {
+        const old_password = try getPasswordWithPrompt(allocator, io, "Current password: ");
+        defer allocator.free(old_password);
+        try sk.decrypt(allocator, old_password);
+    }
+
+    const new_password = try getPasswordWithPrompt(allocator, io, "New password (empty for unencrypted): ");
+    defer allocator.free(new_password);
+
+    if (new_password.len > 0) {
+        const confirm_password = try getPasswordWithPrompt(allocator, io, "Confirm new password: ");
+        defer allocator.free(confirm_password);
+        if (!mem.eql(u8, new_password, confirm_password)) {
+            return error.PasswordMismatch;
+        }
+        try sk.encrypt(allocator, new_password);
+    } else {
+        sk.kdf_algorithm = "\x00\x00".*;
+    }
+
+    try Dir.cwd().deleteFile(io, sk_path);
+    try sk.toFile(io, sk_path);
+}
+
+fn getPasswordWithPrompt(allocator: mem.Allocator, io: Io, prompt: []const u8) ![]u8 {
     const stderr = File.stderr();
     const builtin = @import("builtin");
     const has_termios = builtin.os.tag != .wasi;
@@ -128,7 +132,7 @@ fn getPassword(allocator: mem.Allocator, io: Io) ![]u8 {
         raw.cc[@intFromEnum(std.posix.V.TIME)] = 0; // No timeout
 
         try std.posix.tcsetattr(input_file.handle, .FLUSH, raw);
-        try stderr.writeStreamingAll(io, "Password: ");
+        try stderr.writeStreamingAll(io, prompt);
     }
     defer if (has_termios and is_terminal) {
         stderr.writeStreamingAll(io, "\n") catch {};
@@ -176,12 +180,14 @@ const params = clap.parseParamsComptime(
     \\ -P, --publickey <STRING>         Public key, as a BASE64-encoded string
     \\ -s, --secretkey-path <PATH>      Secret key path to a file
     \\ -l, --legacy                     Accept legacy signatures
-    \\ -m, --input <PATH>               Input file
+    \\ -m, --input <PATH>...            Input file(s)
     \\ -o, --output <PATH>              Output file (signature)
     \\ -q, --quiet                      Quiet mode
     \\ -V, --verify                     Verify
     \\ -S, --sign                       Sign
     \\ -G, --generate                   Generate a new key pair
+    \\ -R, --recreate                   Recreate public key from secret key
+    \\ -K, --change-password            Change secret key password
     \\ -C, --convert                    Convert the given public key to SSH format
     \\ -t, --trusted-comment <STRING>   Trusted comment
     \\ -c, --untrusted-comment <STRING> Untrusted comment
@@ -271,6 +277,8 @@ fn doit(gpa_allocator: mem.Allocator) !void {
     const output_path = res.args.output;
     const sign_mode = res.args.sign != 0;
     const generate_mode = res.args.generate != 0;
+    const recreate_mode = res.args.recreate != 0;
+    const change_password_mode = @field(res.args, "change-password") != 0;
 
     // Determine secret key path (from arg or default)
     const default_sk_path = try getDefaultSecretKeyPath(gpa_allocator, io);
@@ -332,10 +340,7 @@ fn doit(gpa_allocator: mem.Allocator) !void {
             }
         }
 
-        // Prompt for password
-        const stderr = File.stderr();
-        try stderr.writeStreamingAll(io, "Enter password (leave empty for unencrypted key): ");
-        const password = try getPassword(arena.allocator(), io);
+        const password = try getPasswordWithPrompt(arena.allocator(), io, "Enter password (leave empty for unencrypted key): ");
         defer arena.allocator().free(password);
 
         const pwd = if (password.len > 0) password else null;
@@ -351,21 +356,114 @@ fn doit(gpa_allocator: mem.Allocator) !void {
         return;
     }
 
-    // Handle signing mode
-    if (sign_mode) {
-        if (input_path == null) usage(io);
+    if (recreate_mode) {
         if (sk_path == null) {
             var stderr_writer = File.stderr().writer(io, &.{});
-            stderr_writer.interface.writeAll("Error: Secret key path is required for signing\n") catch {};
+            stderr_writer.interface.writeAll("Error: Secret key path (-s) is required for recreating public key\n") catch {};
             usage(io);
         }
 
         var arena = heap.ArenaAllocator.init(gpa_allocator);
         defer arena.deinit();
 
-        const sig_path = if (output_path) |path| path else blk: {
-            break :blk try fmt.allocPrint(arena.allocator(), "{s}.minisig", .{input_path.?});
+        const public_key_path = if (pk_path) |path| path else blk: {
+            break :blk try fmt.allocPrint(arena.allocator(), "{s}.pub", .{sk_path.?});
         };
+
+        const pk_exists = if (Dir.cwd().access(io, public_key_path, .{})) true else |_| false;
+        if (pk_exists) {
+            const stderr = File.stderr();
+            const stdin = File.stdin();
+            var stderr_writer = stderr.writer(io, &.{});
+            const writer = &stderr_writer.interface;
+
+            try writer.print("Warning: Public key file already exists: {s}\n", .{public_key_path});
+            try stderr.writeStreamingAll(io, "Overwrite? (y/N): ");
+
+            var response_buf: [10]u8 = undefined;
+            var reader = stdin.reader(io, &response_buf);
+            const response = reader.interface.takeDelimiterExclusive('\n') catch "";
+
+            const trimmed = mem.trim(u8, response, &std.ascii.whitespace);
+            if (!mem.eql(u8, trimmed, "y") and !mem.eql(u8, trimmed, "Y")) {
+                try writer.writeAll("Aborted.\n");
+                process.exit(1);
+            }
+
+            try Dir.cwd().deleteFile(io, public_key_path);
+        }
+
+        var sk = try SecretKey.fromFile(arena.allocator(), sk_path.?, io);
+        defer sk.deinit();
+
+        if (mem.eql(u8, &sk.kdf_algorithm, "Sc")) {
+            const password = try getPasswordWithPrompt(arena.allocator(), io, "Password: ");
+            defer arena.allocator().free(password);
+            try sk.decrypt(arena.allocator(), password);
+        }
+
+        try sk.getPublicKey().toFile(io, public_key_path);
+
+        if (quiet == 0) {
+            var stdout_writer = File.stdout().writer(io, &.{});
+            try stdout_writer.interface.print("Public key recreated and written to {s}\n", .{public_key_path});
+        }
+        return;
+    }
+
+    if (change_password_mode) {
+        if (sk_path == null) {
+            var stderr_writer = File.stderr().writer(io, &.{});
+            stderr_writer.interface.writeAll("Error: Secret key path (-s) is required for changing password\n") catch {};
+            usage(io);
+        }
+
+        var arena = heap.ArenaAllocator.init(gpa_allocator);
+        defer arena.deinit();
+
+        changePassword(arena.allocator(), io, sk_path.?) catch |err| {
+            var stderr_writer = File.stderr().writer(io, &.{});
+            if (err == error.PasswordMismatch) {
+                stderr_writer.interface.writeAll("Error: Passwords don't match\n") catch {};
+            } else if (err == error.WrongPassword) {
+                stderr_writer.interface.writeAll("Error: Wrong password\n") catch {};
+            } else {
+                stderr_writer.interface.print("Error: {}\n", .{err}) catch {};
+            }
+            process.exit(1);
+        };
+
+        if (quiet == 0) {
+            var stdout_writer = File.stdout().writer(io, &.{});
+            try stdout_writer.interface.print("Password changed for {s}\n", .{sk_path.?});
+        }
+        return;
+    }
+
+    if (sign_mode) {
+        if (input_path.len == 0) usage(io);
+        if (sk_path == null) {
+            var stderr_writer = File.stderr().writer(io, &.{});
+            stderr_writer.interface.writeAll("Error: Secret key path is required for signing\n") catch {};
+            usage(io);
+        }
+        if (output_path != null and input_path.len > 1) {
+            var stderr_writer = File.stderr().writer(io, &.{});
+            stderr_writer.interface.writeAll("Error: Cannot use -o with multiple input files\n") catch {};
+            usage(io);
+        }
+
+        var arena = heap.ArenaAllocator.init(gpa_allocator);
+        defer arena.deinit();
+
+        var sk = try SecretKey.fromFile(arena.allocator(), sk_path.?, io);
+        defer sk.deinit();
+
+        if (mem.eql(u8, &sk.kdf_algorithm, "Sc")) {
+            const password = try getPasswordWithPrompt(arena.allocator(), io, "Password: ");
+            defer arena.allocator().free(password);
+            try sk.decrypt(arena.allocator(), password);
+        }
 
         const trusted_comment = if (@field(res.args, "trusted-comment")) |tc| tc else blk: {
             const now = try Io.Clock.Timestamp.now(io, .real);
@@ -375,11 +473,21 @@ fn doit(gpa_allocator: mem.Allocator) !void {
 
         const untrusted_comment = if (@field(res.args, "untrusted-comment")) |uc| uc else "signature from minizign secret key";
 
-        try sign(arena.allocator(), sk_path.?, input_path.?, sig_path, trusted_comment, untrusted_comment, io);
+        for (input_path) |file_path| {
+            const sig_path = if (output_path) |path| path else blk: {
+                break :blk try fmt.allocPrint(arena.allocator(), "{s}.minisig", .{file_path});
+            };
 
-        if (quiet == 0) {
-            var stdout_writer = File.stdout().writer(io, &.{});
-            try stdout_writer.interface.print("Signature written to {s}\n", .{sig_path});
+            const fd = try Dir.cwd().openFile(io, file_path, .{});
+            defer fd.close(io);
+            var signature = try sk.signFile(arena.allocator(), io, fd, true, trusted_comment);
+            defer signature.deinit();
+            try signature.toFile(io, sig_path, untrusted_comment);
+
+            if (quiet == 0) {
+                var stdout_writer = File.stdout().writer(io, &.{});
+                try stdout_writer.interface.print("Signature written to {s}\n", .{sig_path});
+            }
         }
         return;
     }
@@ -402,12 +510,13 @@ fn doit(gpa_allocator: mem.Allocator) !void {
     }
 
     // Handle verification mode
-    if (input_path == null) {
+    if (input_path.len == 0) {
         usage(io);
     }
+    const verify_input_path = input_path[0];
     var arena = heap.ArenaAllocator.init(gpa_allocator);
     defer arena.deinit();
-    const sig_path = if (output_path) |path| path else try fmt.allocPrint(arena.allocator(), "{s}.minisig", .{input_path.?});
+    const sig_path = if (output_path) |path| path else try fmt.allocPrint(arena.allocator(), "{s}.minisig", .{verify_input_path});
     const sig = Signature.fromFile(arena.allocator(), sig_path, io) catch |err| {
         if (quiet == 0) {
             var stderr_writer = File.stderr().writer(io, &.{});
@@ -419,7 +528,7 @@ fn doit(gpa_allocator: mem.Allocator) !void {
         }
         process.exit(1);
     };
-    if (verify(arena.allocator(), io, pks, input_path.?, sig, prehash)) {
+    if (verify(arena.allocator(), io, pks, verify_input_path, sig, prehash)) {
         if (quiet == 0) {
             var stdout_writer = File.stdout().writer(io, &.{});
             try stdout_writer.interface.print("Signature and comment signature verified\nTrusted comment: {s}\n", .{sig.trusted_comment});

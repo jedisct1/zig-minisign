@@ -31,12 +31,14 @@ Usage:
     -P, --publickey <STRING>         Public key, as a BASE64-encoded string
     -s, --secretkey-path <PATH>      Secret key path to a file
     -l, --legacy                     Accept legacy signatures
-    -m, --input <PATH>               Input file
+    -m, --input <PATH>...            Input file(s)
     -o, --output <PATH>              Output file (signature)
     -q, --quiet                      Quiet mode
     -V, --verify                     Verify
     -S, --sign                       Sign
     -G, --generate                   Generate a new key pair
+    -R, --recreate                   Recreate public key from secret key
+    -K, --change-password            Change secret key password
     -C, --convert                    Convert the given public key to SSH format
     -t, --trusted-comment <STRING>   Trusted comment
     -c, --untrusted-comment <STRING> Untrusted comment
@@ -63,6 +65,30 @@ minizign -S -s minisign.key -m file.txt
 ```
 
 This creates `file.txt.minisig`. You can specify a custom output path with `-o`.
+
+Sign multiple files at once:
+
+```sh
+minizign -S -s minisign.key -m file1.txt -m file2.txt -m file3.txt
+```
+
+### Recreate Public Key
+
+If you lose your public key file, you can recreate it from the secret key:
+
+```sh
+minizign -R -s minisign.key -p minisign.pub
+```
+
+### Change Password
+
+Change the password on an existing secret key:
+
+```sh
+minizign -K -s minisign.key
+```
+
+This prompts for the current password (if encrypted), then asks for a new password with confirmation. Leave the new password empty to remove encryption.
 
 ### Verification
 
