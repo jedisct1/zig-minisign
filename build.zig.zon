@@ -1,7 +1,7 @@
 .{
     .name = .minizign,
-    .version = "0.1.7",
-    .minimum_zig_version = "0.15.1",
+    .version = "0.1.8",
+    .minimum_zig_version = "0.16.0",
     .fingerprint = 0x550c194b717c0d82,
     .paths = .{
         "LICENSE",
