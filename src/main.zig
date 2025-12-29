@@ -412,7 +412,9 @@ fn doit(gpa_allocator: mem.Allocator) !void {
     if (verify(arena.allocator(), io, pks, input_path.?, sig, prehash)) {
         if (quiet == 0) {
             var stdout_writer = File.stdout().writer(io, &.{});
-            try stdout_writer.interface.print("Signature and comment signature verified\nTrusted comment: {s}\n", .{sig.trusted_comment});
+            try stdout_writer.interface.writeAll("Signature and comment signature verified\nTrusted comment: ");
+            try std.zig.stringEscape(sig.trusted_comment, &stdout_writer.interface);
+            try stdout_writer.interface.writeByte('\n');
         }
     } else |err| {
         if (quiet == 0) {
