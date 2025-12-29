@@ -92,6 +92,7 @@ export fn signatureGetTrustedCommentLength(sig: *const Signature) usize {
 /// De-initializes a signature object from a call to signatureDecode.
 export fn signatureDeinit(sig: *Signature) void {
     sig.deinit();
+    alloc.destroy(sig);
 }
 
 /// Takes a base64 encoded string and creates a PublicKey object in the provided buffer.
