@@ -408,13 +408,21 @@ fn doit(gpa_allocator: mem.Allocator) !void {
     var arena = heap.ArenaAllocator.init(gpa_allocator);
     defer arena.deinit();
     const sig_path = if (output_path) |path| path else try fmt.allocPrint(arena.allocator(), "{s}.minisig", .{input_path.?});
-    const sig = try Signature.fromFile(arena.allocator(), sig_path, io);
+    const sig = Signature.fromFile(arena.allocator(), sig_path, io) catch |err| {
+        if (quiet == 0) {
+            var stderr_writer = File.stderr().writer(io, &.{});
+            if (err == error.UnprintableCharacters) {
+                stderr_writer.interface.writeAll("Signature file contains unprintable characters\n") catch {};
+            } else {
+                stderr_writer.interface.print("Error reading signature file: {}\n", .{err}) catch {};
+            }
+        }
+        process.exit(1);
+    };
     if (verify(arena.allocator(), io, pks, input_path.?, sig, prehash)) {
         if (quiet == 0) {
             var stdout_writer = File.stdout().writer(io, &.{});
-            try stdout_writer.interface.writeAll("Signature and comment signature verified\nTrusted comment: ");
-            try std.zig.stringEscape(sig.trusted_comment, &stdout_writer.interface);
-            try stdout_writer.interface.writeByte('\n');
+            try stdout_writer.interface.print("Signature and comment signature verified\nTrusted comment: {s}\n", .{sig.trusted_comment});
         }
     } else |err| {
         if (quiet == 0) {

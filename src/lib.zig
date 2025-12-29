@@ -8,12 +8,23 @@ const math = std.math;
 const mem = std.mem;
 const os = std.os;
 const process = std.process;
+const unicode = std.unicode;
 const Dir = Io.Dir;
 const File = Io.File;
 const Blake2b256 = crypto.hash.blake2.Blake2b256;
 const Blake2b512 = crypto.hash.blake2.Blake2b512;
 const Ed25519 = crypto.sign.Ed25519;
 const Endian = std.builtin.Endian;
+
+fn isPrintable(s: []const u8) bool {
+    const view = unicode.Utf8View.init(s) catch return false;
+    var it = view.iterator();
+    while (it.nextCodepoint()) |cp| {
+        if (cp == '\t') continue;
+        if (cp <= 0x1f or (cp >= 0x7f and cp <= 0x9f)) return false;
+    }
+    return true;
+}
 
 pub const Signature = struct {
     arena: heap.ArenaAllocator,
@@ -48,7 +59,11 @@ pub const Signature = struct {
         if (!mem.startsWith(u8, trusted_comment_line, "trusted comment: ")) {
             return error.InvalidEncoding;
         }
-        const trusted_comment = try allocator.dupe(u8, trusted_comment_line["trusted comment: ".len..]);
+        const trusted_comment_raw = trusted_comment_line["trusted comment: ".len..];
+        if (!isPrintable(trusted_comment_raw)) {
+            return error.UnprintableCharacters;
+        }
+        const trusted_comment = try allocator.dupe(u8, trusted_comment_raw);
         var bin2: [64]u8 = undefined;
         try base64.standard.Decoder.decode(&bin2, mem.trim(u8, it.next() orelse return error.InvalidEncoding, " \t\r\n"));
         const sig = Signature{
