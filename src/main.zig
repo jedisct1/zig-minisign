@@ -203,18 +203,46 @@ fn usage(io: Io) noreturn {
     process.exit(1);
 }
 
-fn getDefaultSecretKeyPath(allocator: mem.Allocator, io: Io) !?[]u8 {
+fn getAppDataDir(allocator: mem.Allocator, environ: process.Environ, appname: []const u8) !?[]u8 {
+    const builtin = @import("builtin");
+    const native_os = builtin.os.tag;
+
+    if (native_os == .windows) {
+        if (environ.getAlloc(allocator, "APPDATA")) |appdata| {
+            defer allocator.free(appdata);
+            return try fmt.allocPrint(allocator, "{s}{c}{s}", .{ appdata, Dir.path.sep, appname });
+        } else |_| {}
+    } else if (native_os == .macos) {
+        if (environ.getAlloc(allocator, "HOME")) |home| {
+            defer allocator.free(home);
+            return try fmt.allocPrint(allocator, "{s}/Library/Application Support/{s}", .{ home, appname });
+        } else |_| {}
+    } else {
+        // Linux/BSD: Use XDG_DATA_HOME or fallback to ~/.local/share
+        if (environ.getAlloc(allocator, "XDG_DATA_HOME")) |data_home| {
+            defer allocator.free(data_home);
+            return try fmt.allocPrint(allocator, "{s}{c}{s}", .{ data_home, Dir.path.sep, appname });
+        } else |_| {}
+        if (environ.getAlloc(allocator, "HOME")) |home| {
+            defer allocator.free(home);
+            return try fmt.allocPrint(allocator, "{s}/.local/share/{s}", .{ home, appname });
+        } else |_| {}
+    }
+    return null;
+}
+
+fn getDefaultSecretKeyPath(allocator: mem.Allocator, io: Io, environ: process.Environ) !?[]u8 {
     const builtin = @import("builtin");
 
     // First check MINISIGN_CONFIG_DIR environment variable
-    if (process.getEnvVarOwned(allocator, "MINISIGN_CONFIG_DIR")) |config_dir| {
+    if (environ.getAlloc(allocator, "MINISIGN_CONFIG_DIR")) |config_dir| {
         defer allocator.free(config_dir);
         const path = try fmt.allocPrint(allocator, "{s}{c}minisign.key", .{ config_dir, Dir.path.sep });
         return path;
     } else |_| {}
 
     // Try $HOME/.minisign/minisign.key
-    if (process.getEnvVarOwned(allocator, "HOME")) |home| {
+    if (environ.getAlloc(allocator, "HOME")) |home| {
         defer allocator.free(home);
         const path = try fmt.allocPrint(allocator, "{s}{c}.minisign{c}minisign.key", .{ home, Dir.path.sep, Dir.path.sep });
         // Check if file exists, if not continue to next option
@@ -222,11 +250,11 @@ fn getDefaultSecretKeyPath(allocator: mem.Allocator, io: Io) !?[]u8 {
             allocator.free(path);
             // File doesn't exist, try app data dir (not available on WASI)
             if (builtin.os.tag != .wasi) {
-                if (std.fs.getAppDataDir(allocator, "minisign")) |app_dir| {
+                if (try getAppDataDir(allocator, environ, "minisign")) |app_dir| {
                     defer allocator.free(app_dir);
                     const app_path = try fmt.allocPrint(allocator, "{s}{c}minisign.key", .{ app_dir, Dir.path.sep });
                     return app_path;
-                } else |_| {}
+                }
             }
             return null;
         };
@@ -235,18 +263,18 @@ fn getDefaultSecretKeyPath(allocator: mem.Allocator, io: Io) !?[]u8 {
 
     // Try app data directory (not available on WASI)
     if (builtin.os.tag != .wasi) {
-        if (std.fs.getAppDataDir(allocator, "minisign")) |app_dir| {
+        if (try getAppDataDir(allocator, environ, "minisign")) |app_dir| {
             defer allocator.free(app_dir);
             const path = try fmt.allocPrint(allocator, "{s}{c}minisign.key", .{ app_dir, Dir.path.sep });
             return path;
-        } else |_| {}
+        }
     }
 
     // No default available
     return null;
 }
 
-fn doit(gpa_allocator: mem.Allocator) !void {
+fn doit(gpa_allocator: mem.Allocator, args: process.Args, environ: process.Environ) !void {
     var threaded = std.Io.Threaded.init_single_threaded;
     const io = threaded.ioBasic();
 
@@ -257,6 +285,7 @@ fn doit(gpa_allocator: mem.Allocator) !void {
     }, .{
         .allocator = gpa_allocator,
         .diagnostic = &diag,
+        .args = args,
     }) catch |err| {
         var buf: [1024]u8 = undefined;
         var stderr_writer = File.stderr().writer(io, &buf);
@@ -281,7 +310,7 @@ fn doit(gpa_allocator: mem.Allocator) !void {
     const change_password_mode = @field(res.args, "change-password") != 0;
 
     // Determine secret key path (from arg or default)
-    const default_sk_path = try getDefaultSecretKeyPath(gpa_allocator, io);
+    const default_sk_path = try getDefaultSecretKeyPath(gpa_allocator, io, environ);
     defer if (default_sk_path) |path| gpa_allocator.free(path);
     const sk_path = sk_path_arg orelse default_sk_path;
 
@@ -566,8 +595,8 @@ fn doit(gpa_allocator: mem.Allocator) !void {
     }
 }
 
-pub fn main() !void {
+pub fn main(init: process.Init.Minimal) !void {
     var gpa = heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
-    try doit(gpa.allocator());
+    try doit(gpa.allocator(), init.args, init.environ);
 }

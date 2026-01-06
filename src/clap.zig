@@ -630,6 +630,8 @@ test "Diagnostic.report" {
 pub const ParseOptions = struct {
     allocator: std.mem.Allocator,
     diagnostic: ?*Diagnostic = null,
+    /// Required for `parse`, not used by `parseEx`.
+    args: ?std.process.Args = null,
 
     /// The assignment separators, which by default is `=`. This is the separator between the name
     /// of an argument and its value. For `--arg=value`, `arg` is the name and `value` is the value
@@ -653,7 +655,7 @@ pub fn parse(
     var arena = std.heap.ArenaAllocator.init(opt.allocator);
     errdefer arena.deinit();
 
-    var iter = try std.process.ArgIterator.initWithAllocator(arena.allocator());
+    var iter = try opt.args.?.iterateAllocator(arena.allocator());
     const exe_arg = iter.next();
 
     const result = try parseEx(Id, params, value_parsers, &iter, .{
