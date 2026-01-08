@@ -39,7 +39,7 @@ fn verify(allocator: mem.Allocator, io: Io, pks: []const PublicKey, path: []cons
 
 fn generate(allocator: mem.Allocator, io: Io, sk_path: []const u8, pk_path: []const u8, password: ?[]const u8) !void {
     // Generate new keypair
-    var sk = try SecretKey.generate(allocator);
+    var sk = try SecretKey.generate(allocator, io);
     defer sk.deinit();
 
     // Extract public key BEFORE encryption
@@ -47,7 +47,7 @@ fn generate(allocator: mem.Allocator, io: Io, sk_path: []const u8, pk_path: []co
 
     // Encrypt if password is provided
     if (password) |pwd| {
-        try sk.encrypt(allocator, pwd);
+        try sk.encrypt(allocator, io, pwd);
     }
 
     // Save secret key and public key
@@ -74,7 +74,7 @@ fn changePassword(allocator: mem.Allocator, io: Io, sk_path: []const u8) !void {
         if (!mem.eql(u8, new_password, confirm_password)) {
             return error.PasswordMismatch;
         }
-        try sk.encrypt(allocator, new_password);
+        try sk.encrypt(allocator, io, new_password);
     } else {
         sk.kdf_algorithm = "\x00\x00".*;
     }

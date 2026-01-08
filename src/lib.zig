@@ -511,13 +511,13 @@ pub const SecretKey = struct {
         };
     }
 
-    pub fn generate(allocator: mem.Allocator) !SecretKey {
+    pub fn generate(allocator: mem.Allocator, io: std.Io) !SecretKey {
         // Generate Ed25519 keypair
-        const keypair = Ed25519.KeyPair.generate();
+        const keypair = Ed25519.KeyPair.generate(io);
 
         // Generate random key ID
         var key_id: [8]u8 = undefined;
-        crypto.random.bytes(&key_id);
+        io.random(&key_id);
 
         // The Ed25519 secret key already contains seed (32) + public key (32) = 64 bytes
         const secret_key = keypair.secret_key.bytes;
@@ -549,10 +549,10 @@ pub const SecretKey = struct {
         };
     }
 
-    pub fn encrypt(self: *SecretKey, allocator: mem.Allocator, password: []const u8) !void {
+    pub fn encrypt(self: *SecretKey, allocator: mem.Allocator, io: std.Io, password: []const u8) !void {
         if (password.len == 0) return error.EmptyPassword;
 
-        crypto.random.bytes(&self.kdf_salt);
+        io.random(&self.kdf_salt);
         self.kdf_opslimit = 524288;
         self.kdf_memlimit = 16777216;
 
