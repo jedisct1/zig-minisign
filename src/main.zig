@@ -278,6 +278,15 @@ fn doit(gpa_allocator: mem.Allocator, args: process.Args, environ: process.Envir
     var threaded = std.Io.Threaded.init_single_threaded;
     const io = threaded.ioBasic();
 
+    // Verify that the system CSPRNG is properly seeded
+    var dummy_byte: [1]u8 = undefined;
+    io.randomSecure(&dummy_byte) catch |err| {
+        var stderr_writer = File.stderr().writer(io, &.{});
+        const stderr = &stderr_writer.interface;
+        stderr.print("Error: Failed to obtain secure randomness: {s}\n", .{@errorName(err)}) catch {};
+        process.exit(1);
+    };
+
     var diag = clap.Diagnostic{};
     var res = clap.parse(clap.Help, &params, .{
         .PATH = clap.parsers.string,
