@@ -53,6 +53,37 @@ pub fn build(b: *std.Build) void {
 
         const run_step = b.step("run", "Run the app");
         run_step.dependOn(&run_cmd.step);
+
+        // Build C shared library
+	const shared_lib = b.addLibrary(.{
+	    .name = "minizign",
+            .linkage = .dynamic,
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/c_api.zig"),
+                .target = target,
+                .optimize = optimize,
+            }),
+	});
+	shared_lib.root_module.addImport("minizign", minizign_module);
+	b.installArtifact(shared_lib);
+
+	// Build C static library
+        // Renaming here to avoid conflicts on Windows:
+        // - Shared libraries make foo.dll and foo.lib
+        // - Static libraries make foo.lib
+        // - Don't want shared and static to be fighting over foo.lib
+	const static_lib = b.addLibrary(.{
+	    .name = "libminizign",
+            .linkage = .static,
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/c_api.zig"),
+                .target = target,
+                .optimize = optimize,
+            }),
+	});
+	static_lib.root_module.addImport("minizign", minizign_module);
+	b.installArtifact(static_lib);
+
     }
 
     const lib_unit_tests = b.addTest(.{
