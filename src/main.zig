@@ -86,7 +86,7 @@ fn changePassword(allocator: mem.Allocator, io: Io, sk_path: []const u8) !void {
 fn getPasswordWithPrompt(allocator: mem.Allocator, io: Io, prompt: []const u8) ![]u8 {
     const stderr = File.stderr();
     const builtin = @import("builtin");
-    const has_termios = builtin.os.tag != .wasi;
+    const has_termios = builtin.os.tag != .wasi and builtin.os.tag != .windows;
 
     // On Unix, try to open /dev/tty for secure password reading
     // This prevents buffered input from being echoed if the process is killed
