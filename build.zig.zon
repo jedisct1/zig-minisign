@@ -10,4 +10,10 @@
         "build.zig.zon",
         "src",
     },
+    .dependencies = .{
+        .clap = .{
+            .url = "git+https://github.com/Hejsil/zig-clap#HEAD",
+            .hash = "clap-0.11.0-oBajB-jlAQA8x4XSScN1d48Q83iYl-LDU63htNyXbXBe",
+        },
+    },
 }

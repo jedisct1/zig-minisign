@@ -24,6 +24,11 @@ pub fn build(b: *std.Build) void {
     // Skip building the CLI executable for freestanding targets (e.g., WASM)
     // since it requires OS features like file I/O, stdin/stdout, and process control
     if (!is_freestanding) {
+        const clap = b.dependency("clap", .{
+            .target = target,
+            .optimize = optimize,
+        });
+
         // Build minzign cli
         const exe = b.addExecutable(.{
             .name = "minizign",
@@ -35,6 +40,7 @@ pub fn build(b: *std.Build) void {
         });
 
         exe.root_module.addImport("minizign", minizign_module);
+        exe.root_module.addImport("clap", clap.module("clap"));
 
         b.installArtifact(exe);
 

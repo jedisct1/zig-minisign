@@ -1,4 +1,4 @@
-const clap = @import("clap.zig");
+const clap = @import("clap");
 const std = @import("std");
 const base64 = std.base64;
 const crypto = std.crypto;
@@ -291,10 +291,9 @@ fn doit(gpa_allocator: mem.Allocator, args: process.Args, environ: process.Envir
     var res = clap.parse(clap.Help, &params, .{
         .PATH = clap.parsers.string,
         .STRING = clap.parsers.string,
-    }, .{
+    }, args, .{
         .allocator = gpa_allocator,
         .diagnostic = &diag,
-        .args = args,
     }) catch |err| {
         var buf: [1024]u8 = undefined;
         var stderr_writer = File.stderr().writer(io, &buf);
