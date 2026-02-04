@@ -1,33 +1,64 @@
 #ifndef MINIZIGN_H
 #define MINIZIGN_H
 
+/* You can customize this header (e.g define MINIZIGN_IMPORT) by
+ * creating this file and putting it in your include path.
+ *
+ * ... or by putting extra stuff in your compiler command line :)
+ */
+#if __has_include(<minizign.tweaks.h>)
+#include <minizign.tweaks.h>
+#endif
+
+/* If you're on Win32 and using the dll, you probably want to define
+ * this to `__declspec(dllimport)` */
+#ifndef MINIZIGN_IMPORT
+#define MINIZIGN_IMPORT
+#endif
+
+
 #include <stdint.h>
 #include <stddef.h>
-#ifdef _WIN32
-#include <wchar.h>
-#endif
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-int32_t minisign_verify(
-    const uint8_t data,
-    size_t data_size,
-    const char* public_key_str,
-    const char* signature_str);
+typedef struct minizign_signature minizign_signature;
+typedef struct minizign_public_key minizign_public_key;
+typedef struct minizign_verifier minizign_verifier;
 
-int32_t minisign_verify_file(
-    const char* data_file,
-    const char* public_key_file,
-    const char* signature_file);
+MINIZIGN_IMPORT minizign_signature* minizign_signature_create(
+    const uint8_t* data,
+    uint32_t dataLength,
+    int32_t* errorOut);
+MINIZIGN_IMPORT void minizign_signature_destroy(minizign_signature*);
 
-#ifdef _WIN32
-int32_t minisign_verify_file_wide(
-    const wchar_t* data_file,
-    const wchar_t* public_key_file,
-    const wchar_t* signature_file);
-#endif
+
+MINIZIGN_IMPORT uintptr_t minizign_public_key_size();
+MINIZIGN_IMPORT minizign_public_key* minizign_public_key_create_from_base64(
+    const uint8_t* data,
+    uint32_t dataLength,
+    int32_t* errorOut);
+MINIZIGN_IMPORT intptr_t minizign_public_key_decode_from_ssh(
+    minizign_public_key* pksOut,
+    uintptr_t pksOutLength,
+    const uint8_t* lines,
+    uintptr_t linesLength);
+MINIZIGN_IMPORT void minizign_public_key_destroy(minizign_public_key*);
+
+MINIZIGN_IMPORT minizign_verifier* minizign_verifier_create(
+    const minizign_public_key*,
+    const minizign_signature*,
+    int32_t* errorOut);
+MINIZIGN_IMPORT void minizign_verifier_update(
+    minizign_verifier*,
+    const uint8_t* data,
+    uint32_t dataLength);
+MINIZIGN_IMPORT intptr_t minizign_verifier_verify(
+    minizign_verifier*);
+MINIZIGN_IMPORT void minizign_verifier_destroy(minizign_verifier*);
+
 
 #ifdef __cplusplus
 }

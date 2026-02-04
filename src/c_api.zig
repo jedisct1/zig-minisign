@@ -1,86 +1,94 @@
-const std = @import("std");
+const impl = @import("verify_api");
 const lib = @import("minizign");
 const PublicKey = lib.PublicKey;
 const Signature = lib.Signature;
-const Io = std.Io;
-const Dir = Io.Dir;
+const Verifier = lib.Verifier;
 
-/// Verifies data using a public key and a signature (both as strings).
-/// Returns 0 on success, or a negative error code.
-export fn minisign_verify(
-    data: [*]const u8,
-    data_size: usize,
-    public_key_str: [*:0]const u8,
-    signature_str: [*:0]const u8,
-) i32 {
-    var gpa = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
-
-    var pks_buf: [1]PublicKey = undefined;
-    const pks = PublicKey.decode(&pks_buf, std.mem.span(public_key_str)) catch return -1;
-    const pk = pks[0];
-
-    var sig = Signature.decode(allocator, std.mem.span(signature_str)) catch return -2;
-    defer sig.deinit();
-
-    var v = pk.verifier(&sig) catch return -3;
-    v.update(data[0..data_size]);
-    v.verify(allocator) catch return -4;
-
-    return 0;
+export fn minizign_public_key_size() usize {
+    return @sizeOf(PublicKey);
 }
 
-/// Verifies a file using a public key file and a signature file.
-/// Returns 0 on success, or a negative error code.
-export fn minisign_verify_file(
-    data_file: [*:0]const u8,
-    public_key_file: [*:0]const u8,
-    signature_file: [*:0]const u8,
-) i32 {
-    var threaded = std.Io.Threaded.init_single_threaded;
-    const io = threaded.ioBasic();
-    var gpa = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+fn unwrapPtrResult(result: impl.Result, error_out: ?*i32) ?*anyopaque {
+    if (@as(isize, @intFromEnum(result)) > 0) {
+        if (error_out) |p| {
+            p.* = 0;
+        }
+        return @ptrFromInt(@as(usize, @intCast(@intFromEnum(result))));
+    }
 
-    var pks_buf: [1]PublicKey = undefined;
-    const pks = PublicKey.fromFile(allocator, &pks_buf, std.mem.span(public_key_file), io) catch return -1;
-    const pk = pks[0];
-
-    var sig = Signature.fromFile(allocator, std.mem.span(signature_file), io) catch return -2;
-    defer sig.deinit();
-
-    const fd = Dir.cwd().openFile(io, std.mem.span(data_file), .{}) catch return -3;
-    defer fd.close(io);
-
-    pk.verifyFile(allocator, io, fd, sig, true) catch return -4;
-
-    return 0;
+    if (error_out) |p| {
+        p.* = @intCast(@intFromEnum(result));
+    }
+    return null;
 }
 
-fn wideToUtf8(allocator: std.mem.Allocator, wpath: [*:0]const u16) ![:0]u8 {
-    return std.unicode.utf16LeToUtf8AllocZ(allocator, std.mem.span(wpath));
+/// Takes a minisign signature and creates a Signature object in memory.
+/// On success, returns a pointer. On failure, returns 0 and sets error_out
+export fn minizign_signature_create(
+    str: [*]const u8,
+    len: u32,
+    error_out: ?*i32
+    ) ?*anyopaque {
+    return unwrapPtrResult(impl.signatureDecode(str, len), error_out);
 }
 
-// For Win32, where UTF-8 code pages are uncommon; support wchar_t
-export fn minisign_verify_file_wide(
-    data_file_w: [*:0]const u16,
-    public_key_file_w: [*:0]const u16,
-    signature_file_w: [*:0]const u16,
-) i32 {
-    var gpa = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+export fn minizign_signature_destroy(sig: *anyopaque) void {
+  impl.signatureDeinit(@ptrCast(@alignCast(sig)));
+}
 
-    const data_path = wideToUtf8(allocator, data_file_w) catch return -1;
-    defer allocator.free(data_path);
+/// Takes base64 input and creates a Public Key object in memory.
+/// On success, returns a pointer. On failure, returns 0 and sets error_out
+///
+/// You should free results with `minizign_public_key_destroy()`
+export fn minizign_public_key_create_from_base64(
+    str: [*]const u8,
+    len: u32,
+    error_out: ?*i32
+) ?*anyopaque {
+    return unwrapPtrResult(impl.publicKeyDecodeFromBase64(str, len), error_out);
+}
 
-    const pk_path = wideToUtf8(allocator, public_key_file_w) catch return -1;
-    defer allocator.free(pk_path);
+/// Create Public key objects in place.
+/// PublicKey should be allocated based on `minizign_public_key_size()`
+/// On success, returns number of keys
+/// On failure, returns a negative error code
+export fn minizign_public_key_decode_from_ssh(
+    pks: [*]PublicKey,
+    pksLength: usize,
+    lines: [*]const u8,
+    linesLength: usize,
+) isize {
+    return @intFromEnum(impl.publicKeyDecodeFromSsh(pks, pksLength, lines, linesLength));
+}
 
-    const sig_path = wideToUtf8(allocator, signature_file_w) catch return -1;
-    defer allocator.free(sig_path);
+export fn minizign_public_key_destroy(pk: *PublicKey) void {
+  impl.publicKeyDeinit(pk);
+}
 
-    return minisign_verify_file(data_path, pk_path, sig_path);
+export fn minizign_verifier_create(
+    pk: *const PublicKey,
+    sig: *const Signature,
+    error_out: ?*i32) ?*anyopaque {
+    return unwrapPtrResult(impl.publicKeyVerifier(pk, sig), error_out);
+}
+
+export fn minizign_verifier_update(
+    verifier: *Verifier,
+    bytes: [*]const u8,
+    length: u32) void {
+    impl.verifierUpdate(verifier, bytes, length);
+}
+
+/// Finalizes the hash over bytes previously passed to the verifier through
+/// calls to verifierUpdate and returns a Result value.
+///
+/// If negative, an error has occurred and the file should not be trusted.
+/// If the signature is valid, the result should be the value 1.
+export fn minizign_verifier_verify(verifier: *Verifier) isize {
+    return @intFromEnum(impl.verifierVerify(verifier));
+}
+
+/// De-initialize a verifier struct from a call to minizign_verifier_create
+export fn minizign_verifier_destroy(verifier: *Verifier) void {
+    impl.verifierDeinit(verifier);
 }

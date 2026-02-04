@@ -17,6 +17,12 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    const verify_api_module = b.createModule(.{
+        .root_source_file = b.path("src/verify_api.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    verify_api_module.addImport("minizign", minizign_module);
 
     const resolved_target = target.result;
     const is_freestanding = resolved_target.os.tag == .freestanding;
@@ -64,6 +70,7 @@ pub fn build(b: *std.Build) void {
                 .optimize = optimize,
             }),
 	});
+	shared_lib.root_module.addImport("verify_api", verify_api_module);
 	shared_lib.root_module.addImport("minizign", minizign_module);
 	b.installArtifact(shared_lib);
 
@@ -81,6 +88,7 @@ pub fn build(b: *std.Build) void {
                 .optimize = optimize,
             }),
 	});
+	static_lib.root_module.addImport("verify_api", verify_api_module);
 	static_lib.root_module.addImport("minizign", minizign_module);
 	b.installArtifact(static_lib);
 
@@ -105,6 +113,7 @@ pub fn build(b: *std.Build) void {
         });
 
         wasm.root_module.addImport("minizign", minizign_module);
+	wasm.root_module.addImport("verify_api", verify_api_module);
 
         wasm.entry = .disabled;
         wasm.export_memory = true;
