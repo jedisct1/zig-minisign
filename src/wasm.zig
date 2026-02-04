@@ -19,6 +19,7 @@ pub const Result = enum(isize) {
     IdentityElement = -10,
     WeakPublicKey = -11,
     Overflow = -12,
+    UnprintableCharacters = -13,
     _,
 
     // Assert that none of the error code values are positive.
@@ -75,6 +76,7 @@ export fn signatureDecode(str: [*]const u8, len: u32) Result {
         error.InvalidCharacter => return .InvalidCharacter,
         error.InvalidPadding => return .InvalidPadding,
         error.NoSpaceLeft => return .NoSpaceLeft,
+        error.UnprintableCharacters => return .UnprintableCharacters,
     };
     return Result.fromPointer(sig);
 }
