@@ -313,20 +313,18 @@ fn doit(gpa_allocator: mem.Allocator, args: process.Args, environ: process.Envir
         process.exit(1);
     };
 
-    var diag = clap.Diagnostic{};
     var res = clap.parse(clap.Help, &params, .{
         .PATH = clap.parsers.string,
         .STRING = clap.parsers.string,
     }, args, .{
         .allocator = gpa_allocator,
-        .diagnostic = &diag,
     }) catch |err| {
         var buf: [1024]u8 = undefined;
         var stderr_writer = File.stderr().writer(io, &buf);
         const stderr = &stderr_writer.interface;
-        diag.report(stderr, err) catch {};
+        stderr.print("Error parsing arguments: {s}\n", .{@errorName(err)}) catch {};
         stderr.flush() catch {};
-        process.exit(1);
+        usage(io);
     };
     defer res.deinit();
 
