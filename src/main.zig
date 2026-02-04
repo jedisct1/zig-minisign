@@ -86,7 +86,9 @@ fn changePassword(allocator: mem.Allocator, io: Io, sk_path: []const u8) !void {
 fn getPasswordWithPrompt(allocator: mem.Allocator, io: Io, prompt: []const u8) ![]u8 {
     const stderr = File.stderr();
     const builtin = @import("builtin");
-    const has_termios = builtin.os.tag != .wasi;
+    const native_os = builtin.os.tag;
+    const has_termios = native_os != .wasi and native_os != .windows;
+    const is_windows = native_os == .windows;
 
     // On Unix, try to open /dev/tty for secure password reading
     // This prevents buffered input from being echoed if the process is killed
@@ -102,12 +104,21 @@ fn getPasswordWithPrompt(allocator: mem.Allocator, io: Io, prompt: []const u8) !
     }
     defer if (tty_file) |f| f.close(io);
 
-    const is_terminal = if (has_termios) (input_file.isTty(io) catch false) else false;
+    const is_terminal = if (has_termios)
+        (input_file.isTty(io) catch false)
+    else if (is_windows)
+        (input_file.isTty(io) catch false)
+    else
+        false;
 
-    var original: std.posix.termios = undefined;
+    // POSIX terminal state
+    var original_termios: std.posix.termios = undefined;
+    // Windows console state
+    var original_console_mode: if (is_windows) std.os.windows.DWORD else void = undefined;
+
     if (has_termios and is_terminal) {
-        original = try std.posix.tcgetattr(input_file.handle);
-        var raw = original;
+        original_termios = try std.posix.tcgetattr(input_file.handle);
+        var raw = original_termios;
 
         // Set raw mode to prevent any buffering
         // Disable canonical mode (line buffering)
@@ -133,17 +144,32 @@ fn getPasswordWithPrompt(allocator: mem.Allocator, io: Io, prompt: []const u8) !
 
         try std.posix.tcsetattr(input_file.handle, .FLUSH, raw);
         try stderr.writeStreamingAll(io, prompt);
+    } else if (is_windows and is_terminal) {
+        const windows = std.os.windows;
+        const handle = input_file.handle;
+        if (windows.kernel32.GetConsoleMode(handle, &original_console_mode) != 0) {
+            // Disable echo and line input
+            const ENABLE_ECHO_INPUT: windows.DWORD = 0x0004;
+            const ENABLE_LINE_INPUT: windows.DWORD = 0x0002;
+            const new_mode = original_console_mode & ~(ENABLE_ECHO_INPUT | ENABLE_LINE_INPUT);
+            _ = windows.kernel32.SetConsoleMode(handle, new_mode);
+        }
+        try stderr.writeStreamingAll(io, prompt);
     }
     defer if (has_termios and is_terminal) {
         stderr.writeStreamingAll(io, "\n") catch {};
-        std.posix.tcsetattr(input_file.handle, .FLUSH, original) catch {};
+        std.posix.tcsetattr(input_file.handle, .FLUSH, original_termios) catch {};
+    };
+    defer if (is_windows and is_terminal) {
+        stderr.writeStreamingAll(io, "\n") catch {};
+        _ = std.os.windows.kernel32.SetConsoleMode(input_file.handle, original_console_mode);
     };
 
     // Read password character by character in raw mode
     var password = std.ArrayList(u8){};
     defer password.deinit(allocator);
 
-    if (has_termios and is_terminal) {
+    if ((has_termios or is_windows) and is_terminal) {
         // Raw mode: read character by character
         var buf: [1]u8 = undefined;
         while (true) {

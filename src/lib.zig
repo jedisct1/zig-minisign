@@ -567,7 +567,14 @@ pub const SecretKey = struct {
     }
 
     pub fn toFile(self: *const SecretKey, io: Io, path: []const u8) !void {
-        const fd = try Dir.cwd().createFile(io, path, .{ .exclusive = true, .permissions = File.Permissions.fromMode(0o600) });
+        const builtin = @import("builtin");
+        // Use restrictive permissions on Unix (0o600 = owner read/write only)
+        // On Windows, use default file attributes (ACLs are handled differently)
+        const permissions: File.Permissions = if (builtin.os.tag != .windows)
+            File.Permissions.fromMode(0o600)
+        else
+            .default_file;
+        const fd = try Dir.cwd().createFile(io, path, .{ .exclusive = true, .permissions = permissions });
         defer fd.close(io);
 
         var buf: [4096]u8 = undefined;
