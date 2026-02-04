@@ -21,8 +21,6 @@ pub fn build(b: *std.Build) void {
     const resolved_target = target.result;
     const is_freestanding = resolved_target.os.tag == .freestanding;
 
-    // Skip building the CLI executable for freestanding targets (e.g., WASM)
-    // since it requires OS features like file I/O, stdin/stdout, and process control
     if (!is_freestanding) {
         const clap = b.dependency("clap", .{
             .target = target,
@@ -55,12 +53,25 @@ pub fn build(b: *std.Build) void {
         run_step.dependOn(&run_cmd.step);
     }
 
-    const lib_unit_tests = b.addTest(.{
-        .root_module = minizign_module,
-    });
-    const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
     const test_step = b.step("test", "Run unit tests");
-    test_step.dependOn(&run_lib_unit_tests.step);
+    if (!is_freestanding) {
+        const lib_unit_tests = b.addTest(.{
+            .root_module = minizign_module,
+        });
+        const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
+        test_step.dependOn(&run_lib_unit_tests.step);
+
+        const wasm_unit_tests = b.addTest(.{
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/wasm.zig"),
+                .target = target,
+                .optimize = optimize,
+            }),
+        });
+        wasm_unit_tests.root_module.addImport("minizign", minizign_module);
+        const run_wasm_unit_tests = b.addRunArtifact(wasm_unit_tests);
+        test_step.dependOn(&run_wasm_unit_tests.step);
+    }
 
     // Build a wasm32-freestanding module when the target is wasm32-freestanding
     if (is_freestanding and resolved_target.cpu.arch == .wasm32) {

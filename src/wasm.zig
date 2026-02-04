@@ -1,10 +1,14 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const lib = @import("minizign");
 const PublicKey = lib.PublicKey;
 const Signature = lib.Signature;
 const Verifier = lib.Verifier;
 
-const alloc = std.heap.wasm_allocator;
+const alloc = if (builtin.target.cpu.arch == .wasm32)
+    std.heap.wasm_allocator
+else
+    std.testing.allocator;
 
 pub const Result = enum(isize) {
     OutOfMemory = -1,
@@ -192,4 +196,204 @@ export fn verifierVerify(verifier: *Verifier) Result {
 /// De-initialize a verifier struct from a call to publicKeyVerifier
 export fn verifierDeinit(verifier: *Verifier) void {
     alloc.destroy(verifier);
+}
+
+const testing = std.testing;
+
+const test_public_key_base64 = "RWQf2YpvkVxNbvjCrthM42frjc/tf26hSzWpOhbD2NqPNqbxcPSLp1fJ";
+
+const test_signature = "untrusted comment: signature from minizign secret key\n" ++
+    "RUQf2YpvkVxNblr+sxVXXUAQnj+/3KcNtjAJcRbfCkh/eovngN0FQa0jVAehA5WqAvw97oHTtjHTwq36LiVAevsz+xmiGcQ9zgw=\n" ++
+    "trusted comment: timestamp:1770197043\n" ++
+    "dycotv6P141y/NeZ0URhzMhNEceSFxQlnIy1or/NqejcQ2fd6CbcV6iYy6vZrwa5GMXTLzoXVY0PPQTZmAUjDg==";
+
+const test_message = "Hello, World!";
+
+test "Result enum values are negative" {
+    try testing.expect(@intFromEnum(Result.OutOfMemory) < 0);
+    try testing.expect(@intFromEnum(Result.InvalidEncoding) < 0);
+    try testing.expect(@intFromEnum(Result.SignatureVerificationFailed) < 0);
+}
+
+test "allocate and free" {
+    const result = allocate(100);
+    const ptr_int = @intFromEnum(result);
+    try testing.expect(ptr_int > 0);
+
+    const ptr: [*]u8 = @ptrFromInt(@as(usize, @intCast(ptr_int)));
+    @memset(ptr[0..100], 0xAA);
+    free(ptr, 100);
+}
+
+test "allocate large buffer" {
+    const result = allocate(1024);
+    const ptr_int = @intFromEnum(result);
+    try testing.expect(ptr_int > 0);
+
+    const ptr: [*]u8 = @ptrFromInt(@as(usize, @intCast(ptr_int)));
+    for (0..1024) |i| {
+        ptr[i] = @truncate(i);
+    }
+    free(ptr, 1024);
+}
+
+test "signatureDecode valid signature" {
+    const result = signatureDecode(test_signature.ptr, test_signature.len);
+    const ptr_int = @intFromEnum(result);
+    try testing.expect(ptr_int > 0);
+
+    const sig: *Signature = @ptrFromInt(@as(usize, @intCast(ptr_int)));
+    const comment = signatureGetTrustedComment(sig);
+    const comment_len = signatureGetTrustedCommentLength(sig);
+    try testing.expect(comment_len > 0);
+    try testing.expect(std.mem.startsWith(u8, comment[0..comment_len], "timestamp:"));
+    signatureDeinit(sig);
+}
+
+test "signatureDecode invalid signature" {
+    const invalid_sig = "not a valid signature";
+    const result = signatureDecode(invalid_sig.ptr, invalid_sig.len);
+    try testing.expectEqual(Result.InvalidEncoding, result);
+}
+
+test "signatureDecode empty input" {
+    const empty = "";
+    const result = signatureDecode(empty.ptr, empty.len);
+    try testing.expectEqual(Result.InvalidEncoding, result);
+}
+
+test "publicKeyDecodeFromBase64 valid key" {
+    const result = publicKeyDecodeFromBase64(test_public_key_base64.ptr, test_public_key_base64.len);
+    const ptr_int = @intFromEnum(result);
+    try testing.expect(ptr_int > 0);
+
+    const pk: *PublicKey = @ptrFromInt(@as(usize, @intCast(ptr_int)));
+    publicKeyDeinit(pk);
+}
+
+test "publicKeyDecodeFromBase64 invalid length" {
+    const short_key = "RWQf6LRCGA9i53ml";
+    const result = publicKeyDecodeFromBase64(short_key.ptr, short_key.len);
+    try testing.expectEqual(Result.InvalidEncoding, result);
+}
+
+test "publicKeyDecodeFromBase64 invalid base64" {
+    const invalid_key = "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!";
+    const result = publicKeyDecodeFromBase64(invalid_key.ptr, 56);
+    try testing.expectEqual(Result.InvalidCharacter, result);
+}
+
+test "publicKeyDecodeFromSsh valid key" {
+    const ssh_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMBaTHaGYzeYmYd5V8hn0gHBJcwQnqk7FgGwpS3bnLmM minisign key 1FE8B442180F62E7\n";
+    var pks: [1]PublicKey = undefined;
+
+    const result = publicKeyDecodeFromSsh(&pks, pks.len, ssh_key.ptr, ssh_key.len);
+    const count = @intFromEnum(result);
+    try testing.expectEqual(@as(isize, 1), count);
+    try testing.expect(!std.mem.eql(u8, &pks[0].key_id, &[_]u8{0} ** 8));
+}
+
+test "publicKeyDecodeFromSsh invalid format" {
+    const invalid_ssh = "not an ssh key";
+    var pks: [1]PublicKey = undefined;
+
+    const result = publicKeyDecodeFromSsh(&pks, pks.len, invalid_ssh.ptr, invalid_ssh.len);
+    try testing.expectEqual(Result.InvalidEncoding, result);
+}
+
+test "full verification workflow with prehash signature" {
+    const pk_result = publicKeyDecodeFromBase64(test_public_key_base64.ptr, test_public_key_base64.len);
+    const pk_ptr_int = @intFromEnum(pk_result);
+    try testing.expect(pk_ptr_int > 0);
+    const pk: *PublicKey = @ptrFromInt(@as(usize, @intCast(pk_ptr_int)));
+    defer publicKeyDeinit(pk);
+
+    const sig_result = signatureDecode(test_signature.ptr, test_signature.len);
+    const sig_ptr_int = @intFromEnum(sig_result);
+    try testing.expect(sig_ptr_int > 0);
+    const sig: *Signature = @ptrFromInt(@as(usize, @intCast(sig_ptr_int)));
+    defer signatureDeinit(sig);
+
+    const verifier_result = publicKeyVerifier(pk, sig);
+    const verifier_ptr_int = @intFromEnum(verifier_result);
+    try testing.expect(verifier_ptr_int > 0);
+    const verifier: *Verifier = @ptrFromInt(@as(usize, @intCast(verifier_ptr_int)));
+    defer verifierDeinit(verifier);
+
+    verifierUpdate(verifier, test_message.ptr, test_message.len);
+
+    const verify_result = verifierVerify(verifier);
+    try testing.expectEqual(@as(isize, 1), @intFromEnum(verify_result));
+}
+
+test "verification fails with wrong message" {
+    const pk_result = publicKeyDecodeFromBase64(test_public_key_base64.ptr, test_public_key_base64.len);
+    const pk_ptr_int = @intFromEnum(pk_result);
+    try testing.expect(pk_ptr_int > 0);
+    const pk: *PublicKey = @ptrFromInt(@as(usize, @intCast(pk_ptr_int)));
+    defer publicKeyDeinit(pk);
+
+    const sig_result = signatureDecode(test_signature.ptr, test_signature.len);
+    const sig_ptr_int = @intFromEnum(sig_result);
+    try testing.expect(sig_ptr_int > 0);
+    const sig: *Signature = @ptrFromInt(@as(usize, @intCast(sig_ptr_int)));
+    defer signatureDeinit(sig);
+
+    const verifier_result = publicKeyVerifier(pk, sig);
+    const verifier_ptr_int = @intFromEnum(verifier_result);
+    try testing.expect(verifier_ptr_int > 0);
+    const verifier: *Verifier = @ptrFromInt(@as(usize, @intCast(verifier_ptr_int)));
+    defer verifierDeinit(verifier);
+
+    const wrong_message = "Wrong message!";
+    verifierUpdate(verifier, wrong_message.ptr, wrong_message.len);
+
+    const verify_result = verifierVerify(verifier);
+    try testing.expectEqual(Result.SignatureVerificationFailed, verify_result);
+}
+
+test "verifier with key ID mismatch" {
+    const different_pk_base64 = "RWQ/aDkoT504Nren5nFravQC1+BBRKriJSESwsBHC4JRAuQEGqiMnuup";
+
+    const pk_result = publicKeyDecodeFromBase64(different_pk_base64.ptr, different_pk_base64.len);
+    const pk_ptr_int = @intFromEnum(pk_result);
+    try testing.expect(pk_ptr_int > 0);
+    const pk: *PublicKey = @ptrFromInt(@as(usize, @intCast(pk_ptr_int)));
+    defer publicKeyDeinit(pk);
+
+    const sig_result = signatureDecode(test_signature.ptr, test_signature.len);
+    const sig_ptr_int = @intFromEnum(sig_result);
+    try testing.expect(sig_ptr_int > 0);
+    const sig: *Signature = @ptrFromInt(@as(usize, @intCast(sig_ptr_int)));
+    defer signatureDeinit(sig);
+
+    const verifier_result = publicKeyVerifier(pk, sig);
+    try testing.expectEqual(Result.KeyIdMismatch, verifier_result);
+}
+
+test "incremental verification" {
+    const pk_result = publicKeyDecodeFromBase64(test_public_key_base64.ptr, test_public_key_base64.len);
+    const pk_ptr_int = @intFromEnum(pk_result);
+    try testing.expect(pk_ptr_int > 0);
+    const pk: *PublicKey = @ptrFromInt(@as(usize, @intCast(pk_ptr_int)));
+    defer publicKeyDeinit(pk);
+
+    const sig_result = signatureDecode(test_signature.ptr, test_signature.len);
+    const sig_ptr_int = @intFromEnum(sig_result);
+    try testing.expect(sig_ptr_int > 0);
+    const sig: *Signature = @ptrFromInt(@as(usize, @intCast(sig_ptr_int)));
+    defer signatureDeinit(sig);
+
+    const verifier_result = publicKeyVerifier(pk, sig);
+    const verifier_ptr_int = @intFromEnum(verifier_result);
+    try testing.expect(verifier_ptr_int > 0);
+    const verifier: *Verifier = @ptrFromInt(@as(usize, @intCast(verifier_ptr_int)));
+    defer verifierDeinit(verifier);
+
+    for (test_message) |byte| {
+        verifierUpdate(verifier, @as([*]const u8, @ptrCast(&byte)), 1);
+    }
+
+    const verify_result = verifierVerify(verifier);
+    try testing.expectEqual(@as(isize, 1), @intFromEnum(verify_result));
 }
