@@ -173,8 +173,10 @@ fn getPasswordWithPrompt(allocator: mem.Allocator, io: Io, prompt: []const u8) !
         // Raw mode: read character by character
         var buf: [1]u8 = undefined;
         while (true) {
-            const n = try input_file.readStreaming(io, &.{&buf});
-            if (n == 0) break; // EOF
+            _ = input_file.readStreaming(io, &.{&buf}) catch |err| switch (err) {
+                error.EndOfStream => break,
+                else => return err,
+            };
 
             const c = buf[0];
             if (c == '\n' or c == '\r') {

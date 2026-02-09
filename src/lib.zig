@@ -242,12 +242,12 @@ pub const PublicKey = struct {
             }
         }
 
+        var read_buf: [heap.page_size_max]u8 = undefined;
+        var reader = fd.reader(io, &read_buf);
         var buf: [heap.page_size_max]u8 = undefined;
         while (true) {
-            const read_nb = try fd.readStreaming(io, &.{&buf});
-            if (read_nb == 0) {
-                break;
-            }
+            const read_nb = try reader.interface.readSliceShort(&buf);
+            if (read_nb == 0) break;
             v.update(buf[0..read_nb]);
         }
         try v.verify(allocator);
@@ -467,9 +467,11 @@ pub const SecretKey = struct {
 
         var message: [64]u8 = undefined;
         var hasher = Blake2b512.init(.{});
+        var read_buf: [heap.page_size_max]u8 = undefined;
+        var reader = fd.reader(io, &read_buf);
         var buf: [heap.page_size_max]u8 = undefined;
         while (true) {
-            const read_nb = try fd.readStreaming(io, &.{&buf});
+            const read_nb = try reader.interface.readSliceShort(&buf);
             if (read_nb == 0) break;
             hasher.update(buf[0..read_nb]);
         }
