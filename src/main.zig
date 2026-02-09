@@ -527,7 +527,7 @@ fn doit(gpa_allocator: mem.Allocator, args: process.Args, environ: process.Envir
         }
 
         const trusted_comment = if (@field(res.args, "trusted-comment")) |tc| tc else blk: {
-            const now = try Io.Clock.Timestamp.now(io, .real);
+            const now = Io.Clock.Timestamp.now(io, .real);
             const timestamp = now.raw.toSeconds();
             break :blk try fmt.allocPrint(arena.allocator(), "timestamp:{d}", .{timestamp});
         };
