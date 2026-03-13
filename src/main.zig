@@ -166,7 +166,7 @@ fn getPasswordWithPrompt(allocator: mem.Allocator, io: Io, prompt: []const u8) !
     };
 
     // Read password character by character in raw mode
-    var password = std.ArrayList(u8){};
+    var password: std.ArrayList(u8) = .empty;
     defer password.deinit(allocator);
 
     if ((has_termios or is_windows) and is_terminal) {
@@ -305,9 +305,7 @@ fn getDefaultSecretKeyPath(allocator: mem.Allocator, io: Io, environ: process.En
     return null;
 }
 
-fn doit(gpa_allocator: mem.Allocator, args: process.Args, environ: process.Environ) !void {
-    var threaded = std.Io.Threaded.init_single_threaded;
-    const io = threaded.ioBasic();
+fn doit(gpa_allocator: mem.Allocator, io: Io, args: process.Args, environ: process.Environ) !void {
 
     // Verify that the system CSPRNG is properly seeded
     var dummy_byte: [1]u8 = undefined;
@@ -637,8 +635,6 @@ fn doit(gpa_allocator: mem.Allocator, args: process.Args, environ: process.Envir
     }
 }
 
-pub fn main(init: process.Init.Minimal) !void {
-    var gpa = heap.DebugAllocator(.{}){};
-    defer _ = gpa.deinit();
-    try doit(gpa.allocator(), init.args, init.environ);
+pub fn main(init: process.Init) !void {
+    try doit(init.gpa, init.io, init.minimal.args, init.minimal.environ);
 }
