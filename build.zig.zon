@@ -12,8 +12,8 @@
     },
     .dependencies = .{
         .clap = .{
-            .url = "git+https://github.com/Hejsil/zig-clap#27621cb7207643f914bae7b01902b22a8b5916e7",
-            .hash = "clap-0.11.0-oBajBxDoAQChQCl4LRM4tyf-VChKLbhYilS806xxzxrQ",
+            .url = "git+https://github.com/Hejsil/zig-clap#8d97efa1ee1e575443c7888d5c38e1c3fc145cf5",
+            .hash = "clap-0.12.0-oBajB7foAQDqlSwaSG5g0yq7xGbQARUsBk5T64gAOqP5",
         },
     },
 }
