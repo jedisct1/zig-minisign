@@ -281,19 +281,19 @@ pub const PublicKey = struct {
     }
 
     pub fn toFile(self: PublicKey, io: Io, path: []const u8) !void {
-        const fd = try Dir.cwd().createFile(io, path, .{ .exclusive = true });
-        defer fd.close(io);
+        var atomic = try Dir.cwd().createFileAtomic(io, path, .{
+            .replace = true,
+        });
+        defer atomic.deinit(io);
 
         var buf: [256]u8 = undefined;
-        var file_writer = fd.writer(io, &buf);
+        var file_writer = atomic.file.writer(io, &buf);
         const writer = &file_writer.interface;
 
-        // Write untrusted comment
         const comment = "untrusted comment: minisign public key";
         try writer.writeAll(comment);
         try writer.writeAll("\n");
 
-        // Encode and write public key
         var bin: [42]u8 = undefined;
         @memcpy(bin[0..2], &self.signature_algorithm);
         @memcpy(bin[2..10], &self.key_id);
@@ -306,6 +306,7 @@ pub const PublicKey = struct {
         try writer.writeAll("\n");
 
         try writer.flush();
+        try atomic.replace(io);
     }
 };
 
@@ -584,24 +585,23 @@ pub const SecretKey = struct {
 
     pub fn toFile(self: *const SecretKey, io: Io, path: []const u8) !void {
         const builtin = @import("builtin");
-        // Use restrictive permissions on Unix (0o600 = owner read/write only)
-        // On Windows, use default file attributes (ACLs are handled differently)
         const permissions: File.Permissions = if (builtin.os.tag != .windows)
             File.Permissions.fromMode(0o600)
         else
             .default_file;
-        const fd = try Dir.cwd().createFile(io, path, .{ .exclusive = true, .permissions = permissions });
-        defer fd.close(io);
+        var atomic = try Dir.cwd().createFileAtomic(io, path, .{
+            .permissions = permissions,
+            .replace = true,
+        });
+        defer atomic.deinit(io);
 
         var buf: [4096]u8 = undefined;
-        var file_writer = fd.writer(io, &buf);
+        var file_writer = atomic.file.writer(io, &buf);
         const writer = &file_writer.interface;
 
-        // Write untrusted comment
         try writer.writeAll(self.untrusted_comment);
         try writer.writeAll("\n");
 
-        // Encode secret key
         var bin: [158]u8 = undefined;
         @memcpy(bin[0..2], &self.signature_algorithm);
         @memcpy(bin[2..4], &self.kdf_algorithm);
@@ -620,5 +620,6 @@ pub const SecretKey = struct {
         try writer.writeAll("\n");
 
         try writer.flush();
+        try atomic.replace(io);
     }
 };

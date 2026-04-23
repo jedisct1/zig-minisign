@@ -79,7 +79,6 @@ fn changePassword(allocator: mem.Allocator, io: Io, sk_path: []const u8) !void {
         sk.kdf_algorithm = "\x00\x00".*;
     }
 
-    try Dir.cwd().deleteFile(io, sk_path);
     try sk.toFile(io, sk_path);
 }
 
@@ -399,14 +398,6 @@ fn doit(gpa_allocator: mem.Allocator, io: Io, args: process.Args, environ: proce
                 try writer.writeAll("Aborted.\n");
                 process.exit(1);
             }
-
-            // Delete existing files if user confirmed
-            if (sk_exists) {
-                try Dir.cwd().deleteFile(io, sk_path.?);
-            }
-            if (pk_exists) {
-                try Dir.cwd().deleteFile(io, public_key_path);
-            }
         }
 
         const password = try getPasswordWithPrompt(arena.allocator(), io, "Enter password (leave empty for unencrypted key): ");
@@ -458,8 +449,6 @@ fn doit(gpa_allocator: mem.Allocator, io: Io, args: process.Args, environ: proce
                 try writer.writeAll("Aborted.\n");
                 process.exit(1);
             }
-
-            try Dir.cwd().deleteFile(io, public_key_path);
         }
 
         var sk = try SecretKey.fromFile(arena.allocator(), sk_path.?, io);
