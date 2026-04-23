@@ -563,6 +563,10 @@ pub const SecretKey = struct {
 
     pub fn encrypt(self: *SecretKey, allocator: mem.Allocator, io: std.Io, password: []const u8) !void {
         if (password.len == 0) return error.EmptyPassword;
+        if (!mem.eql(u8, &self.kdf_algorithm, "\x00\x00")) {
+            if (mem.eql(u8, &self.kdf_algorithm, "Sc")) return error.AlreadyEncrypted;
+            return error.UnsupportedKdfAlgorithm;
+        }
 
         io.random(&self.kdf_salt);
         self.kdf_opslimit = 524288;
