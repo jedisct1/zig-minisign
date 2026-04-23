@@ -439,20 +439,30 @@ pub const SecretKey = struct {
         const params = crypto.pwhash.scrypt.Params.fromLimits(self.kdf_opslimit, @intCast(self.kdf_memlimit));
         try crypto.pwhash.scrypt.kdf(allocator, &stream, password, &self.kdf_salt, params);
 
-        self.xorData(&stream);
+        var decrypted_key_id = self.key_id;
+        var decrypted_secret_key = self.secret_key;
+        defer crypto.secureZero(u8, &decrypted_secret_key);
+        var decrypted_checksum = self.checksum;
 
-        // Verify checksum
+        for (&decrypted_key_id, stream[0..8]) |*byte, key| byte.* ^= key;
+        for (&decrypted_secret_key, stream[8..72]) |*byte, key| byte.* ^= key;
+        for (&decrypted_checksum, stream[72..104]) |*byte, key| byte.* ^= key;
+
+        // Verify checksum before mutating the stored encrypted fields.
         var computed_checksum: [32]u8 = undefined;
         var hasher = Blake2b256.init(.{});
         hasher.update(&self.signature_algorithm);
-        hasher.update(&self.key_id);
-        hasher.update(&self.secret_key);
+        hasher.update(&decrypted_key_id);
+        hasher.update(&decrypted_secret_key);
         hasher.final(&computed_checksum);
 
-        if (!crypto.timing_safe.eql([32]u8, computed_checksum, self.checksum)) {
-            crypto.secureZero(u8, &self.secret_key);
+        if (!crypto.timing_safe.eql([32]u8, computed_checksum, decrypted_checksum)) {
             return error.WrongPassword;
         }
+
+        self.key_id = decrypted_key_id;
+        self.secret_key = decrypted_secret_key;
+        self.checksum = decrypted_checksum;
     }
 
     pub fn signFile(
