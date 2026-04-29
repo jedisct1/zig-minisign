@@ -584,8 +584,7 @@ pub const SecretKey = struct {
     }
 
     pub fn toFile(self: *const SecretKey, io: Io, path: []const u8) !void {
-        const builtin = @import("builtin");
-        const permissions: File.Permissions = if (builtin.os.tag != .windows)
+        const permissions: File.Permissions = if (@hasDecl(File.Permissions, "fromMode"))
             File.Permissions.fromMode(0o600)
         else
             .default_file;
