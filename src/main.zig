@@ -19,6 +19,9 @@ const PublicKey = lib.PublicKey;
 const Signature = lib.Signature;
 const SecretKey = lib.SecretKey;
 
+extern "kernel32" fn GetConsoleMode(hConsoleHandle: std.os.windows.HANDLE, lpMode: *std.os.windows.DWORD) callconv(.winapi) std.os.windows.BOOL;
+extern "kernel32" fn SetConsoleMode(hConsoleHandle: std.os.windows.HANDLE, dwMode: std.os.windows.DWORD) callconv(.winapi) std.os.windows.BOOL;
+
 fn verify(allocator: mem.Allocator, io: Io, pks: []const PublicKey, path: []const u8, sig: Signature, prehash: ?bool) !void {
     var had_key_id_mismatch = false;
     var i: usize = pks.len;
@@ -146,12 +149,12 @@ fn getPasswordWithPrompt(allocator: mem.Allocator, io: Io, prompt: []const u8) !
     } else if (is_windows and is_terminal) {
         const windows = std.os.windows;
         const handle = input_file.handle;
-        if (windows.kernel32.GetConsoleMode(handle, &original_console_mode) != 0) {
+        if (GetConsoleMode(handle, &original_console_mode).toBool()) {
             // Disable echo and line input
             const ENABLE_ECHO_INPUT: windows.DWORD = 0x0004;
             const ENABLE_LINE_INPUT: windows.DWORD = 0x0002;
             const new_mode = original_console_mode & ~(ENABLE_ECHO_INPUT | ENABLE_LINE_INPUT);
-            _ = windows.kernel32.SetConsoleMode(handle, new_mode);
+            _ = SetConsoleMode(handle, new_mode);
         }
         try stderr.writeStreamingAll(io, prompt);
     }
@@ -161,7 +164,7 @@ fn getPasswordWithPrompt(allocator: mem.Allocator, io: Io, prompt: []const u8) !
     };
     defer if (is_windows and is_terminal) {
         stderr.writeStreamingAll(io, "\n") catch {};
-        _ = std.os.windows.kernel32.SetConsoleMode(input_file.handle, original_console_mode);
+        _ = SetConsoleMode(input_file.handle, original_console_mode);
     };
 
     // Read password character by character in raw mode
