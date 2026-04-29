@@ -62,8 +62,10 @@ export fn free(pointer: [*]u8, len: u32) void {
     alloc.free(pointer[0..len]);
 }
 
-/// Takes minisign signature and creates a Signature object in memory.
-/// On success, returns the number of bytes used. On failure, returns 0.
+/// Takes a minisign signature and creates a Signature object on the heap.
+/// On success, returns a pointer to the Signature as a positive integer.
+/// On failure, returns a negative Result error code.
+/// The returned object must be released with signatureDeinit.
 export fn signatureDecode(str: [*]const u8, len: u32) Result {
     const sig = struct {
         fn impl(str_: [*]const u8, len_: u32) !*Signature {
@@ -101,8 +103,10 @@ export fn signatureDeinit(sig: *Signature) void {
     alloc.destroy(sig);
 }
 
-/// Takes a base64 encoded string and creates a PublicKey object in the provided buffer.
-/// On success, returns the number of bytes used. On failure, returns 0.
+/// Takes a base64-encoded string and creates a PublicKey object on the heap.
+/// On success, returns a pointer to the PublicKey as a positive integer.
+/// On failure, returns a negative Result error code.
+/// The returned object must be released with publicKeyDeinit.
 export fn publicKeyDecodeFromBase64(str: [*]const u8, len: u32) Result {
     const pk = struct {
         fn impl(str_: [*]const u8, len_: u32) !*PublicKey {
@@ -125,8 +129,11 @@ export fn publicKeyDecodeFromBase64(str: [*]const u8, len: u32) Result {
     return Result.fromPointer(pk);
 }
 
-/// Initialize a list of public keys from an ssh encoded file.
-/// Returns the number of keys decoded or an error code.
+/// Fills a caller-provided buffer of PublicKey slots from an SSH-encoded file.
+/// On success, returns the number of keys decoded as a positive integer.
+/// On failure, returns a negative Result error code.
+/// The keys live in the caller-provided buffer and need no cleanup; do NOT
+/// pass them to publicKeyDeinit.
 export fn publicKeyDecodeFromSsh(
     pks: [*]PublicKey,
     pksLength: usize,
@@ -143,7 +150,9 @@ export fn publicKeyDecodeFromSsh(
     return @enumFromInt(result.len);
 }
 
-/// De-initialize a public key object from a call to any publicKeyDecode* function.
+/// Releases a PublicKey object allocated by publicKeyDecodeFromBase64.
+/// Do NOT call this on keys produced by publicKeyDecodeFromSsh: those live in
+/// a caller-provided buffer and require no cleanup.
 export fn publicKeyDeinit(pk: *PublicKey) void {
     alloc.destroy(pk);
 }
