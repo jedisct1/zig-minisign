@@ -92,17 +92,17 @@ fn getPasswordWithPrompt(allocator: mem.Allocator, io: Io, prompt: []const u8) !
     const has_termios = native_os != .wasi and native_os != .windows;
     const is_windows = native_os == .windows;
 
-    // On Unix, try to open /dev/tty for secure password reading
-    // This prevents buffered input from being echoed if the process is killed
+    const stdin = File.stdin();
+    const stdin_is_tty = stdin.isTty(io) catch false;
+
     var tty_file: ?File = null;
     var input_file: File = undefined;
 
-    if (has_termios) {
-        // Try to open /dev/tty first (more secure)
+    if (has_termios and stdin_is_tty) {
         tty_file = Dir.openFileAbsolute(io, "/dev/tty", .{ .mode = .read_write }) catch null;
-        input_file = tty_file orelse File.stdin();
+        input_file = tty_file orelse stdin;
     } else {
-        input_file = File.stdin();
+        input_file = stdin;
     }
     defer if (tty_file) |f| f.close(io);
 
