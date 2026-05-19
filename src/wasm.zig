@@ -299,7 +299,7 @@ test "publicKeyDecodeFromSsh valid key" {
     const result = publicKeyDecodeFromSsh(&pks, pks.len, ssh_key.ptr, ssh_key.len);
     const count = @intFromEnum(result);
     try testing.expectEqual(@as(isize, 1), count);
-    try testing.expect(!std.mem.eql(u8, &pks[0].key_id, &[_]u8{0} ** 8));
+    try testing.expect(!std.mem.eql(u8, &pks[0].key_id, &@as([8]u8, @splat(0))));
 }
 
 test "publicKeyDecodeFromSsh invalid format" {
