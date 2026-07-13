@@ -29,8 +29,8 @@ pub const Result = enum(isize) {
     // Assert that none of the error code values are positive.
     comptime {
         const type_info = @typeInfo(Result);
-        for (type_info.@"enum".fields) |field| {
-            if (field.value >= 0) {
+        for (type_info.@"enum".field_values) |value| {
+            if (value >= 0) {
                 @compileError("Result values must be negative.");
             }
         }
