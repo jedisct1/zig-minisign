@@ -1,6 +1,6 @@
 .{
     .name = .minizign,
-    .version = "0.1.13",
+    .version = "0.1.14",
     .minimum_zig_version = "0.17.0",
     .fingerprint = 0x550c194b717c0d82,
     .paths = .{
