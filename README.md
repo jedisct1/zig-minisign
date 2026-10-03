@@ -22,6 +22,9 @@ zig build -Doptimize=ReleaseFast
 
 for a speed-optimized version.
 
+If you only need the `minizign` module as a dependency, pass `-Dno-cli` (or `.@"no-cli" = true` in `b.dependency()`) to skip the command-line tool.
+The `clap` dependency is lazy, so it won't be fetched in that case.
+
 ## Usage
 
 ```text

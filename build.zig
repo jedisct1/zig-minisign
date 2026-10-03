@@ -21,11 +21,17 @@ pub fn build(b: *std.Build) void {
     const resolved_target = target.result;
     const is_freestanding = resolved_target.os.tag == .freestanding;
 
-    if (!is_freestanding) {
-        const clap = b.dependency("clap", .{
+    const no_cli = b.option(
+        bool,
+        "no-cli",
+        "do not build the command line tool",
+    ) orelse false;
+
+    if (!no_cli and !is_freestanding) cli: {
+        const clap = b.lazyDependency("clap", .{
             .target = target,
             .optimize = optimize,
-        });
+        }) orelse break :cli;
 
         // Build minzign cli
         const exe = b.addExecutable(.{
