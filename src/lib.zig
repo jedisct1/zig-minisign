@@ -341,6 +341,10 @@ pub const Verifier = struct {
         Legacy: Ed25519.Verifier,
     },
 
+    pub const Error = std.mem.Allocator.Error ||
+        std.crypto.errors.NonCanonicalError ||
+        Ed25519.Signature.VerifyError;
+
     pub fn update(self: *Verifier, bytes: []const u8) void {
         switch (self.format) {
             .Prehash => |*prehash| prehash.update(bytes),
@@ -348,7 +352,7 @@ pub const Verifier = struct {
         }
     }
 
-    pub fn verify(self: *Verifier, allocator: std.mem.Allocator) !void {
+    pub fn verify(self: *Verifier, allocator: std.mem.Allocator) Error!void {
         const ed25519_pk = try Ed25519.PublicKey.fromBytes(self.pk.key);
         switch (self.format) {
             .Prehash => |*prehash| {
