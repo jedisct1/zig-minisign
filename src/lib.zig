@@ -82,19 +82,32 @@ pub const Signature = struct {
         const fd = try Dir.cwd().openFile(io, path, .{});
         defer fd.close(io);
         var file_reader = fd.reader(io, &.{});
-        const sig_str = try file_reader.interface.allocRemaining(allocator, .limited(4096));
+        const sig_str = file_reader.interface.allocRemaining(allocator, .limited(4096)) catch |err| switch (err) {
+            error.ReadFailed => return file_reader.err.?,
+            else => |e| return e,
+        };
         defer allocator.free(sig_str);
         return Signature.decode(allocator, sig_str);
     }
 
-    pub fn toFile(self: *const Signature, io: Io, path: []const u8, untrusted_comment: []const u8) !void {
+    pub fn toFile(
+        self: *const Signature,
+        io: Io,
+        path: []const u8,
+        untrusted_comment: []const u8,
+    ) (std.Io.File.OpenError || std.Io.File.Writer.Error)!void {
         const fd = try Dir.cwd().createFile(io, path, .{});
         defer fd.close(io);
 
         var buf: [4096]u8 = undefined;
         var file_writer = fd.writer(io, &buf);
-        const writer = &file_writer.interface;
 
+        self.toWriter(&file_writer.interface, untrusted_comment) catch |err| switch (err) {
+            error.WriteFailed => return file_writer.err.?,
+        };
+    }
+
+    fn toWriter(self: *const Signature, writer: *std.Io.Writer, untrusted_comment: []const u8) std.Io.Writer.Error!void {
         // Write untrusted comment
         const comment_prefix = "untrusted comment: ";
         try writer.writeAll(comment_prefix);
@@ -209,7 +222,10 @@ pub const PublicKey = struct {
         const fd = try Dir.cwd().openFile(io, path, .{});
         defer fd.close(io);
         var file_reader = fd.reader(io, &.{});
-        const pk_str = try file_reader.interface.allocRemaining(allocator, .limited(4096));
+        const pk_str = file_reader.interface.allocRemaining(allocator, .limited(4096)) catch |err| switch (err) {
+            error.ReadFailed => return file_reader.err.?,
+            else => |e| return e,
+        };
         defer allocator.free(pk_str);
         return PublicKey.decode(pks, pk_str);
     }
@@ -246,7 +262,9 @@ pub const PublicKey = struct {
         var reader = fd.reader(io, &read_buf);
         var buf: [heap.page_size_max]u8 = undefined;
         while (true) {
-            const read_nb = try reader.interface.readSliceShort(&buf);
+            const read_nb = reader.interface.readSliceShort(&buf) catch |err| switch (err) {
+                error.ReadFailed => return reader.err.?,
+            };
             if (read_nb == 0) break;
             v.update(buf[0..read_nb]);
         }
@@ -288,8 +306,14 @@ pub const PublicKey = struct {
 
         var buf: [256]u8 = undefined;
         var file_writer = atomic.file.writer(io, &buf);
-        const writer = &file_writer.interface;
+        self.toWriter(&file_writer.interface) catch |err| switch (err) {
+            error.WriteFailed => return file_writer.err.?,
+        };
 
+        try atomic.replace(io);
+    }
+
+    fn toWriter(self: PublicKey, writer: *std.Io.Writer) std.Io.Writer.Error!void {
         const comment = "untrusted comment: minisign public key";
         try writer.writeAll(comment);
         try writer.writeAll("\n");
@@ -306,7 +330,6 @@ pub const PublicKey = struct {
         try writer.writeAll("\n");
 
         try writer.flush();
-        try atomic.replace(io);
     }
 };
 
@@ -412,7 +435,10 @@ pub const SecretKey = struct {
         const fd = try Dir.cwd().openFile(io, path, .{});
         defer fd.close(io);
         var file_reader = fd.reader(io, &.{});
-        const sk_str = try file_reader.interface.allocRemaining(allocator, .limited(4096));
+        const sk_str = file_reader.interface.allocRemaining(allocator, .limited(4096)) catch |err| switch (err) {
+            error.ReadFailed => return file_reader.err.?,
+            else => |e| return e,
+        };
         defer allocator.free(sk_str);
         return SecretKey.decode(allocator, sk_str);
     }
@@ -482,7 +508,9 @@ pub const SecretKey = struct {
         var reader = fd.reader(io, &read_buf);
         var buf: [heap.page_size_max]u8 = undefined;
         while (true) {
-            const read_nb = try reader.interface.readSliceShort(&buf);
+            const read_nb = reader.interface.readSliceShort(&buf) catch |err| switch (err) {
+                error.ReadFailed => return reader.err.?,
+            };
             if (read_nb == 0) break;
             hasher.update(buf[0..read_nb]);
         }
@@ -596,8 +624,14 @@ pub const SecretKey = struct {
 
         var buf: [4096]u8 = undefined;
         var file_writer = atomic.file.writer(io, &buf);
-        const writer = &file_writer.interface;
+        self.toWriter(&file_writer.interface) catch |err| switch (err) {
+            error.WriteFailed => return file_writer.err.?,
+        };
 
+        try atomic.replace(io);
+    }
+
+    fn toWriter(self: *const SecretKey, writer: *std.Io.Writer) std.Io.Writer.Error!void {
         try writer.writeAll(self.untrusted_comment);
         try writer.writeAll("\n");
 
@@ -619,6 +653,5 @@ pub const SecretKey = struct {
         try writer.writeAll("\n");
 
         try writer.flush();
-        try atomic.replace(io);
     }
 };
